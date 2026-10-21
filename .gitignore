@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+studio.db
+storage/
+.pytest_cache/

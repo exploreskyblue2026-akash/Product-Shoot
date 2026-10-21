@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Skyblue Studio Admin</title>
+<link rel="icon" href="data:image/png;base64,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">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..900&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/studio.css">
+<style>
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+[hidden]{display:none!important}
+.top{background:var(--azure);color:var(--on-azure)}
+.top-in{max-width:1280px;margin:0 auto;padding-block:16px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.top img{width:52px;height:52px}
+.top h1{font-family:var(--f-display);font-variation-settings:"wdth" 125;font-weight:900;font-size:clamp(22px,3vw,32px);text-transform:uppercase;line-height:1}
+.top .btn{background:#FFFFFF;color:#0A0E14;border-color:#FFFFFF}
+.top .btn:focus-visible{outline-color:#FFFFFF}
+.wrap{max-width:1280px;margin:0 auto;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;grid-template-columns:220px minmax(0,1fr);gap:20px}
+@media (max-width:820px){.wrap{grid-template-columns:minmax(0,1fr)}}
+.side{display:flex;flex-direction:column;gap:2px}
+@media (max-width:820px){.side{flex-direction:row;flex-wrap:wrap;gap:6px}}
+.side button{all:unset;cursor:pointer;padding:10px 12px;border-radius:var(--r);font-size:14px;font-weight:600}
+.side button:hover{background:var(--sunk)}
+.side button[aria-current="true"]{background:var(--ink);color:var(--bg)}
+.side button:focus-visible{outline:2px solid var(--azure);outline-offset:2px}
+.content{display:flex;flex-direction:column;gap:16px;min-width:0}
+.content h2.big{font-family:var(--f-display);font-variation-settings:"wdth" 125;font-weight:800;font-size:24px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:16px}
+.grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:12px}
+.form2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:12px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.seg button{all:unset;cursor:pointer;padding:5px 10px;font-size:12px;font-weight:600}
+.seg button[aria-pressed="true"]{background:var(--azure);color:var(--on-azure)}
+.seg button:focus-visible{outline:2px solid var(--azure);outline-offset:-2px}
+pre.prompt{margin:0;font-family:var(--f-mono);font-size:12px;line-height:1.55;white-space:pre-wrap;background:var(--sunk);border-radius:6px;padding:12px;max-height:380px;overflow:auto}
+.keyrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:8px}
+.keyrow b{display:block;font-size:14px}
+.repo{background:var(--sunk);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.repo b{font-size:15px}
+.kpi b{display:block;font-family:var(--f-display);font-variation-settings:"wdth" 125;font-weight:800;font-size:28px;font-variant-numeric:tabular-nums}
+.meter{height:6px;border-radius:3px;background:var(--sunk);overflow:hidden;margin-top:8px}.meter i{display:block;height:100%;background:var(--azure)}
+.hbar{display:grid;grid-template-columns:minmax(0,150px) minmax(0,1fr) 64px;gap:10px;align-items:center;font-size:13px}
+.hbar i{display:block;height:12px;border-radius:2px;background:var(--azure)}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <div style="display:flex;align-items:flex-end;gap:14px">
+      <img src="data:image/png;base64,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" alt="Skyblue">
+      <div><h1>Admin</h1><span style="font-size:13px;font-weight:600" id="who">Product Studio settings</span></div>
+    </div>
+    <a class="btn" href="/">Back to studio</a>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="side" aria-label="Admin sections">
+    <button type="button" data-tab="rules" aria-current="true">Rulebook &amp; prompts</button>
+    <button type="button" data-tab="brands">Brands &amp; library</button>
+    <button type="button" data-tab="api">API &amp; models</button>
+    <button type="button" data-tab="repos">Repositories</button>
+    <button type="button" data-tab="auto">Autopilot rules</button>
+    <button type="button" data-tab="team">Team</button>
+    <button type="button" data-tab="usage">Usage &amp; cost</button>
+    <button type="button" data-tab="log">Activity log</button>
+  </nav>
+
+  <main class="content">
+    <!-- RULES -->
+    <section data-panel="rules" class="content">
+      <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 class="big">Rulebook &amp; prompts</h2><span class="mono hint" id="rv-label"></span></div>
+      <div class="grid2">
+        <section class="panel">
+          <div class="panel-h"><h2>Rule strength</h2><span class="hint">Edits go to the draft</span></div>
+          <div class="tbl-wrap"><table style="min-width:460px"><thead><tr><th>Rule</th><th>What it controls</th><th>Strength</th></tr></thead><tbody id="rules"></tbody></table></div>
+          <div class="field" style="margin-top:12px"><label for="negs">Never show (one per line)</label><textarea id="negs" rows="6"></textarea></div>
+          <div class="toolbar" style="margin-top:12px"><button class="btn" type="button" id="save-negs">Save to draft</button><button class="btn primary" type="button" id="submit">Send for approval</button><button class="btn" type="button" id="approve-rules">Approve pending</button></div>
+        </section>
+        <section class="panel">
+          <div class="panel-h"><h2>Live prompt preview</h2>
+            <div class="field" style="flex-direction:row;align-items:center;gap:8px"><label for="pv-shot">Shot</label><select id="pv-shot" style="min-height:32px;padding:4px 8px"><option value="1">1 Hero</option><option value="2" selected>2 Use case</option><option value="3">3 Detail</option><option value="4">4 Arrangement</option><option value="5">5 Lifestyle</option></select></div>
+          </div>
+          <pre class="prompt" id="prompt">Loading…</pre>
+          <p class="hint" id="pv-for" style="margin:8px 0 0"></p>
+        </section>
+      </div>
+      <section class="panel">
+        <div class="panel-h"><h2>Shot directions</h2><button class="btn sm" type="button" id="save-shots">Save shots to draft</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Shot</th><th>Camera</th><th>Framing</th><th>Props</th></tr></thead><tbody id="shots"></tbody></table></div>
+      </section>
+      <section class="panel">
+        <div class="panel-h"><h2>Versions</h2></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Version</th><th>Status</th><th>By</th><th>Approved by</th><th></th></tr></thead><tbody id="versions"></tbody></table></div>
+      </section>
+    </section>
+
+    <!-- BRANDS / LIBRARY -->
+    <section data-panel="brands" class="content" hidden>
+      <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 class="big">Brands &amp; library</h2>
+        <span class="seg" role="group" aria-label="Library table" id="lib-tabs"><button type="button" data-lib="brands" aria-pressed="true">Brands</button><button type="button" data-lib="categories" aria-pressed="false">Categories</button><button type="button" data-lib="moods" aria-pressed="false">Moods</button><button type="button" data-lib="props" aria-pressed="false">Props</button></span></div>
+      <section class="panel">
+        <div class="panel-h"><h2 id="lib-title">Brands</h2><button class="btn sm primary" type="button" id="lib-add">+ Add</button></div>
+        <form id="lib-form" hidden style="margin-bottom:14px"><div class="form2" id="lib-fields"></div><div class="toolbar" style="margin-top:12px"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="lib-cancel">Cancel</button><button class="btn danger" type="button" id="lib-del" hidden>Delete</button></div></form>
+        <div class="tbl-wrap"><table><thead id="lib-head"></thead><tbody id="lib-body"></tbody></table></div>
+      </section>
+    </section>
+
+    <!-- API -->
+    <section data-panel="api" class="content" hidden>
+      <h2 class="big">API &amp; models</h2>
+      <div class="grid2">
+        <section class="panel">
+          <div class="panel-h"><h2>Keys</h2><span class="hint">Owner only · stored encrypted</span></div>
+          <div id="keys" style="display:flex;flex-direction:column;gap:8px"></div>
+          <form id="key-form" class="toolbar" style="margin-top:12px">
+            <div class="field" style="flex:0 1 230px"><label for="key-name">Key</label><select id="key-name"><option>GEMINI_API_KEY</option><option>GOOGLE_SERVICE_ACCOUNT_JSON</option><option>SHOPIFY_ADMIN_TOKEN</option><option>REMOVE_BG_API_KEY</option></select></div>
+            <div class="field" style="flex:1 1 220px"><label for="key-val">Value</label><input id="key-val" type="password" autocomplete="off" required></div>
+            <button class="btn primary" type="submit">Save key</button>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="panel-h"><h2>Connection tests</h2></div>
+          <div class="toolbar"><button class="btn" type="button" data-test="gemini">Test Gemini</button><button class="btn" type="button" data-test="google">Test Google Drive</button><button class="btn" type="button" data-test="shopify">Test Shopify</button></div>
+          <p class="hint" id="test-out" style="margin:12px 0 0;white-space:pre-wrap"></p>
+          <div class="form2" style="margin-top:14px">
+            <div class="field"><label for="s-model_hero_detail">Model · hero &amp; detail</label><input id="s-model_hero_detail" class="mono" data-setting="model_hero_detail"></div>
+            <div class="field"><label for="s-model_other">Model · other shots</label><input id="s-model_other" class="mono" data-setting="model_other"></div>
+          </div>
+          <div class="toolbar" style="margin-top:12px"><button class="btn" type="button" data-save-settings>Save models</button></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- REPOS -->
+    <section data-panel="repos" class="content" hidden>
+      <div class="toolbar" style="justify-content:space-between;align-items:center"><h2 class="big">Repositories</h2><button class="btn primary" type="button" id="repo-add-btn" aria-expanded="false">+ Add repository</button></div>
+      <form class="panel" id="repo-form" hidden>
+        <div class="panel-h"><h2>New repository</h2></div>
+        <div class="form2">
+          <div class="field"><label for="rp-use">Use for</label><select id="rp-use"><option>Input · photos</option><option>Input · catalogue</option><option>Product data</option><option>Saved output</option><option>Publish</option></select></div>
+          <div class="field"><label for="rp-type">Source</label><select id="rp-type"><option>Google Drive</option><option>Google Sheet</option><option>Shopify</option></select></div>
+          <div class="field"><label for="rp-name">Name</label><input id="rp-name" placeholder="e.g. Camel brand folder" required></div>
+          <div class="field"><label for="rp-path">Link or path</label><input id="rp-path" class="mono" placeholder="https://drive.google.com/drive/folders/…" required></div>
+        </div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-top:12px"><input type="checkbox" id="rp-watch" checked style="accent-color:var(--azure);width:16px;height:16px">Watch for new files</label>
+        <div class="toolbar" style="margin-top:12px"><button class="btn primary" type="submit">Add repository</button><button class="btn" type="button" id="repo-cancel">Cancel</button></div>
+      </form>
+      <div class="grid4" id="repo-grid"></div>
+      <p class="hint">Input repositories also appear in the studio's left column. A Drive "Saved output" repository receives every approved shot.</p>
+    </section>
+
+    <!-- AUTOPILOT -->
+    <section data-panel="auto" class="content" hidden>
+      <h2 class="big">Autopilot rules</h2>
+      <section class="panel">
+        <div class="form2">
+          <div class="field"><label for="s-auto_approve">Auto-approve</label><select id="s-auto_approve" data-setting="auto_approve" data-type="bool"><option value="true">When all QC checks pass</option><option value="false">Never (always review)</option></select></div>
+          <div class="field"><label for="s-retries">Retries per failed shot</label><select id="s-retries" data-setting="retries" data-type="int"><option>0</option><option>1</option><option>2</option><option>3</option></select></div>
+          <div class="field"><label for="s-publish_shopify">After approval</label><select id="s-publish_shopify" data-setting="publish_shopify" data-type="bool"><option value="false">Save to Drive only</option><option value="true">Save and publish Shopify draft</option></select></div>
+          <div class="field"><label for="s-budget_month">Monthly budget (USD)</label><input id="s-budget_month" data-setting="budget_month" data-type="float" inputmode="decimal"></div>
+          <div class="field"><label for="s-budget_action">At 100% of budget</label><select id="s-budget_action" data-setting="budget_action"><option value="pause">Pause autopilot</option><option value="alert">Keep going</option></select></div>
+          <div class="field"><label for="s-file_naming">File naming</label><input id="s-file_naming" class="mono" data-setting="file_naming"></div>
+        </div>
+        <div class="toolbar" style="margin-top:12px"><button class="btn primary" type="button" data-save-settings>Save autopilot rules</button></div>
+      </section>
+    </section>
+
+    <!-- TEAM -->
+    <section data-panel="team" class="content" hidden>
+      <h2 class="big">Team</h2>
+      <section class="panel">
+        <form class="toolbar" id="invite" style="margin-bottom:12px">
+          <div class="field" style="flex:1 1 220px"><label for="inv-email">Invite by email</label><input id="inv-email" type="email" placeholder="name@company.com" required></div>
+          <div class="field" style="flex:0 1 160px"><label for="inv-role">Role</label><select id="inv-role"><option value="admin">Admin</option><option value="editor" selected>Editor</option><option value="viewer">Viewer</option></select></div>
+          <button class="btn primary" type="submit">Create invite</button>
+        </form>
+        <div id="inv-link" hidden class="panel" style="background:var(--sunk);border:none;margin-bottom:12px"><span class="lbl">Send this link to them</span><div class="mono" style="overflow-wrap:anywhere;margin:6px 0" id="inv-url"></div><button class="btn sm" type="button" id="inv-copy">Copy link</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Person</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody id="team"></tbody></table></div>
+      </section>
+    </section>
+
+    <!-- USAGE -->
+    <section data-panel="usage" class="content" hidden>
+      <h2 class="big">Usage &amp; cost</h2>
+      <div class="grid4" id="kpis"></div>
+      <section class="panel"><div class="panel-h"><h2>Spend by model this month</h2></div><div id="bymodel" style="display:flex;flex-direction:column;gap:10px"></div></section>
+    </section>
+
+    <!-- LOG -->
+    <section data-panel="log" class="content" hidden>
+      <h2 class="big">Activity log</h2>
+      <section class="panel"><div class="tbl-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody id="log"></tbody></table></div></section>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+<script>
+(function(){
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function toast(m){const t=$("#toast");t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,3200)}
+async function api(p,o={}){const r=await fetch(p,{credentials:"same-origin",headers:o.body?{"Content-Type":"application/json"}:{},...o,body:o.body?JSON.stringify(o.body):undefined});
+  if(r.status===401){location.href="/login";throw new Error("signin")}const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||"Request failed");return j}
+const run=f=>async(...a)=>{try{await f(...a)}catch(e){if(e.message!=="signin")toast(e.message)}};
+const loaders={};
+document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll("[data-tab]").forEach(x=>x.setAttribute("aria-current","false"));b.setAttribute("aria-current","true");document.querySelectorAll("[data-panel]").forEach(p=>p.hidden=p.dataset.panel!==b.dataset.tab);(loaders[b.dataset.tab]||(()=>{}))()}));
+
+/* ---------- rules ---------- */
+const STR=[["lighting","Lighting softness"],["attention","70 / 30 product focus"],["size","Product size in frame"],["props","Props count and style"],["negative_space","Space for text"]],LV=["relaxed","normal","strict"];
+let R=null;
+function work(){return (R.draft||R.live).data}
+loaders.rules=run(async()=>{R=await api("/api/admin/rules");const d=work(),st=d.strength||{};
+  $("#rv-label").textContent=`live v${R.live.version}`+(R.draft?` · ${R.draft.status} v${R.draft.version}`:"");
+  $("#rules").innerHTML=STR.map(([k,l])=>`<tr><td style="font-weight:600">${l}</td><td class="hint">${k.replace("_"," ")}</td><td><span class="seg" role="group" aria-label="${l}">${LV.map(v=>`<button type="button" data-str="${k}" data-v="${v}" aria-pressed="${(st[k]||"normal")==v}">${v[0].toUpperCase()+v.slice(1)}</button>`).join("")}</span></td></tr>`).join("");
+  $("#negs").value=(d.studio_standard.global_negative||[]).join("\n");
+  $("#shots").innerHTML=d.shot_directions.shots.map((s,i)=>!s.camera?`<tr><td>${s.no}</td><td>${esc(s.id)}</td><td colspan="3" class="hint">${esc(s.mode_rule||"Two modes: macro or feature callout")}</td></tr>`:`<tr><td>${s.no}</td><td>${esc(s.id)}</td><td><input aria-label="Camera for shot ${s.no}" data-shot="${i}" data-f="camera" value="${esc(s.camera||"")}" style="width:100%;min-width:180px;border:1px solid var(--line);border-radius:4px;padding:6px;background:var(--surface)"></td><td><input aria-label="Framing for shot ${s.no}" data-shot="${i}" data-f="framing" value="${esc(s.framing||"")}" style="width:100%;min-width:180px;border:1px solid var(--line);border-radius:4px;padding:6px;background:var(--surface)"></td><td class="hint">${esc(s.props||"")}</td></tr>`).join("");
+  $("#versions").innerHTML=R.history.map(h=>`<tr><td class="mono">v${h.version}</td><td><span class="chip ${h.status=="live"?"ok":h.status=="pending"?"warn":"mute"}">${h.status}</span></td><td>${esc(h.by)}</td><td>${esc(h.approved_by)}</td><td>${h.status=="archived"?`<button class="btn sm" type="button" data-rollback="${h.version}">Restore as draft</button>`:""}</td></tr>`).join("");
+  preview()});
+const preview=run(async()=>{const r=await api("/api/admin/rules/preview?shot="+$("#pv-shot").value);$("#prompt").textContent=r.prompt;$("#pv-for").textContent=r.product?`Preview for ${r.product} with rules v${r.version}`:""});
+$("#pv-shot").addEventListener("change",preview);
+const saveDraft=run(async data=>{await api("/api/admin/rules/draft",{method:"PUT",body:{data}});toast("Saved to draft");loaders.rules()});
+document.addEventListener("click",e=>{const b=e.target.closest("[data-str]");if(b){const st={...(work().strength||{}),[b.dataset.str]:b.dataset.v};saveDraft({strength:st})}
+  const rb=e.target.closest("[data-rollback]");if(rb)run(async()=>{await api("/api/admin/rules/rollback/"+rb.dataset.rollback,{method:"POST"});toast("Restored as a new draft");loaders.rules()})()});
+$("#save-negs").addEventListener("click",()=>{const ss={...work().studio_standard,global_negative:$("#negs").value.split("\n").map(x=>x.trim()).filter(Boolean)};saveDraft({studio_standard:ss})});
+$("#save-shots").addEventListener("click",()=>{const sd=JSON.parse(JSON.stringify(work().shot_directions));document.querySelectorAll("#shots input").forEach(i=>{sd.shots[+i.dataset.shot][i.dataset.f]=i.value});saveDraft({shot_directions:sd})});
+$("#submit").addEventListener("click",run(async()=>{await api("/api/admin/rules/submit",{method:"POST"});toast("Sent for approval");loaders.rules()}));
+$("#approve-rules").addEventListener("click",run(async()=>{await api("/api/admin/rules/approve",{method:"POST"});toast("New rules are live");loaders.rules()}));
+
+/* ---------- library ---------- */
+const KEY={brands:"brand_id",categories:"category_id",moods:"mood_id",props:"prop_id"};
+const COLS={brands:["brand_id","brand_name","mood_override","hero_backdrop","brand_donts"],categories:["category_id","name","default_moods","surfaces","human_mode"],moods:["mood_id","name","palette","light_ratio"],props:["prop_id","prop","categories","shots","moods"]};
+let lib="brands",rows=[],editing=null;
+loaders.brands=run(async()=>{rows=await api("/api/admin/library/"+lib);$("#lib-title").textContent=lib[0].toUpperCase()+lib.slice(1)+` (${rows.length})`;
+  $("#lib-head").innerHTML="<tr>"+COLS[lib].map(c=>`<th>${c.replace(/_/g," ")}</th>`).join("")+"<th></th></tr>";
+  $("#lib-body").innerHTML=rows.map((r,i)=>"<tr>"+COLS[lib].map(c=>`<td${c==KEY[lib]?' class="mono"':""}>${esc(r[c])}</td>`).join("")+`<td><button class="btn sm" type="button" data-edit="${i}">Edit</button></td></tr>`).join("")});
+function openLib(row){editing=row;const cols=row?Object.keys(row):(rows[0]?Object.keys(rows[0]):COLS[lib]);
+  $("#lib-fields").innerHTML=cols.map(c=>`<div class="field"><label for="lf-${c}">${c.replace(/_/g," ")}</label><input id="lf-${c}" data-col="${c}" value="${esc(row?row[c]:"")}" ${row&&c==KEY[lib]?"readonly":""}></div>`).join("");
+  $("#lib-form").hidden=false;$("#lib-del").hidden=!row;$("#lib-fields input").focus()}
+document.getElementById("lib-tabs").addEventListener("click",e=>{const b=e.target.closest("[data-lib]");if(!b)return;document.querySelectorAll("[data-lib]").forEach(x=>x.setAttribute("aria-pressed",x===b));lib=b.dataset.lib;$("#lib-form").hidden=true;loaders.brands()});
+$("#lib-add").addEventListener("click",()=>openLib(null));$("#lib-cancel").addEventListener("click",()=>$("#lib-form").hidden=true);
+document.addEventListener("click",e=>{const b=e.target.closest("[data-edit]");if(b)openLib(rows[+b.dataset.edit])});
+$("#lib-form").addEventListener("submit",run(async e=>{e.preventDefault();const row={};document.querySelectorAll("#lib-fields input").forEach(i=>row[i.dataset.col]=i.value.trim());const key=row[KEY[lib]];if(!key){toast("The id field is required");return}
+  await api(`/api/admin/library/${lib}/${encodeURIComponent(key)}`,{method:"PUT",body:row});$("#lib-form").hidden=true;toast("Saved "+key);loaders.brands()}));
+let delArm=false;$("#lib-del").addEventListener("click",run(async()=>{if(!delArm){delArm=true;$("#lib-del").textContent="Confirm delete";return}delArm=false;$("#lib-del").textContent="Delete";
+  await api(`/api/admin/library/${lib}/${encodeURIComponent(editing[KEY[lib]])}`,{method:"DELETE"});$("#lib-form").hidden=true;toast("Deleted");loaders.brands()}));
+
+/* ---------- api + settings ---------- */
+loaders.api=run(async()=>{const k=await api("/api/admin/keys");$("#keys").innerHTML=k.map(x=>`<div class="keyrow"><span><b class="mono" style="font-size:13px">${x.name}</b><span class="mono hint">${x.set?esc(x.masked)+(x.from_env?" · from Railway variable":""):"not set"}</span></span><span class="chip ${x.set?"ok":"mute"}">${x.set?"Set":"Missing"}</span><span></span></div>`).join("");loadSettings()});
+$("#key-form").addEventListener("submit",run(async e=>{e.preventDefault();await api("/api/admin/keys",{method:"PUT",body:{name:$("#key-name").value,value:$("#key-val").value}});$("#key-val").value="";toast("Key saved");loaders.api()}));
+document.querySelectorAll("[data-test]").forEach(b=>b.addEventListener("click",run(async()=>{$("#test-out").textContent="Testing "+b.dataset.test+"…";const r=await api("/api/admin/test/"+b.dataset.test,{method:"POST"});$("#test-out").textContent=(r.ok?"✓ ":"✕ ")+r.message})));
+const loadSettings=run(async()=>{const s=await api("/api/admin/settings");document.querySelectorAll("[data-setting]").forEach(el=>{const v=s[el.dataset.setting];el.value=v===undefined||v===null?"":String(v)})});
+document.querySelectorAll("[data-save-settings]").forEach(b=>b.addEventListener("click",run(async()=>{const body={};b.closest("section").querySelectorAll("[data-setting]").forEach(el=>{let v=el.value;const t=el.dataset.type;if(t=="bool")v=v=="true";if(t=="int")v=parseInt(v,10);if(t=="float")v=parseFloat(v);body[el.dataset.setting]=v});await api("/api/admin/settings",{method:"PUT",body});toast("Saved")})));
+loaders.auto=loadSettings;
+
+/* ---------- repositories ---------- */
+loaders.repos=run(async()=>{const r=await api("/api/admin/repositories");$("#repo-grid").innerHTML=r.map(x=>`<div class="repo"><span class="lbl">${esc(x.use)}</span><b>${esc(x.name)}</b><span class="mono hint" style="overflow-wrap:anywhere">${esc(x.type)} · ${esc(x.path)}</span><span><span class="chip ok">Added</span>${x.watch?' <span class="chip info">Watching</span>':""}</span><span class="toolbar"><button class="btn sm danger" type="button" data-rm="${x.id}">Remove</button></span></div>`).join("")||'<p class="hint">No repositories yet. Add your Drive output folder first.</p>'});
+const rf=$("#repo-form"),rb=$("#repo-add-btn");function openForm(o){rf.hidden=!o;rb.setAttribute("aria-expanded",o);if(o)$("#rp-name").focus()}
+rb.addEventListener("click",()=>openForm(rf.hidden));$("#repo-cancel").addEventListener("click",()=>openForm(false));
+rf.addEventListener("submit",run(async e=>{e.preventDefault();await api("/api/admin/repositories",{method:"POST",body:{use:$("#rp-use").value,type:$("#rp-type").value,name:$("#rp-name").value,path:$("#rp-path").value,watch:$("#rp-watch").checked}});rf.reset();openForm(false);toast("Repository added");loaders.repos()}));
+let armed=null;document.addEventListener("click",e=>{const b=e.target.closest("[data-rm]");if(!b)return;if(armed!==b){if(armed)armed.textContent="Remove";armed=b;b.textContent="Confirm remove";return}
+  run(async()=>{await api("/api/admin/repositories/"+b.dataset.rm,{method:"DELETE"});armed=null;toast("Removed");loaders.repos()})()});
+
+/* ---------- team ---------- */
+loaders.team=run(async()=>{const t=await api("/api/admin/team");$("#team").innerHTML=t.map(u=>`<tr><td>${esc(u.email)}</td><td>${u.role=="owner"?"Owner":`<select aria-label="Role for ${esc(u.email)}" data-role="${u.id}" style="border:1px solid var(--line);border-radius:4px;padding:4px;background:var(--surface)">${["admin","editor","viewer"].map(r=>`<option${r==u.role?" selected":""}>${r}</option>`).join("")}</select>`}</td><td><span class="chip ${u.active?"ok":u.pending?"warn":"mute"}">${u.active?"Active":u.pending?"Invite pending":"Removed"}</span></td><td>${u.role!="owner"&&(u.active||u.pending)?`<button class="btn sm danger" type="button" data-remove-user="${u.id}">Remove</button>`:""}</td></tr>`).join("")});
+$("#invite").addEventListener("submit",run(async e=>{e.preventDefault();const r=await api("/api/admin/team",{method:"POST",body:{email:$("#inv-email").value,role:$("#inv-role").value}});$("#inv-url").textContent=r.link;$("#inv-link").hidden=false;$("#inv-email").value="";loaders.team()}));
+$("#inv-copy").addEventListener("click",()=>{const t=$("#inv-url").textContent;(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast("Link copied"),()=>{const r=document.createRange();r.selectNodeContents($("#inv-url"));getSelection().removeAllRanges();getSelection().addRange(r);toast("Press Ctrl+C to copy")})});
+document.addEventListener("change",e=>{const s=e.target.closest("[data-role]");if(s)run(async()=>{await api("/api/admin/team/"+s.dataset.role,{method:"PATCH",body:{role:s.value}});toast("Role updated")})()});
+document.addEventListener("click",e=>{const b=e.target.closest("[data-remove-user]");if(b)run(async()=>{await api("/api/admin/team/"+b.dataset.removeUser,{method:"PATCH",body:{remove:true}});toast("Access removed");loaders.team()})()});
+
+/* ---------- usage + log ---------- */
+loaders.usage=run(async()=>{const u=await api("/api/admin/usage");const pct=Math.min(100,Math.round(100*u.spend_month/(u.budget||1)));
+  $("#kpis").innerHTML=`<div class="panel kpi"><span class="lbl">Spend this month</span><b>$${u.spend_month.toFixed(2)}</b><span class="hint">of $${u.budget} budget</span><div class="meter"><i style="width:${pct}%"></i></div></div><div class="panel kpi"><span class="lbl">Images generated</span><b>${u.images}</b><span class="hint">this month</span></div><div class="panel kpi"><span class="lbl">Products saved</span><b>${u.saved_products}</b><span class="hint">$${u.cost_per_product} each</span></div><div class="panel kpi"><span class="lbl">First-try QC pass</span><b>${u.first_pass_rate}%</b><span class="hint">of generated shots</span></div>`;
+  const max=Math.max(...u.by_model.map(m=>m.cost),0.01);$("#bymodel").innerHTML=u.by_model.map(m=>`<div class="hbar"><span class="mono" style="overflow-wrap:anywhere">${esc(m.model)}</span><i style="width:${Math.max(2,100*m.cost/max)}%"></i><span class="mono" style="text-align:right">$${m.cost.toFixed(2)}</span></div>`).join("")||'<p class="hint">No usage yet this month.</p>'});
+loaders.log=run(async()=>{const a=await api("/api/admin/activity");$("#log").innerHTML=a.map(x=>`<tr><td class="mono" style="white-space:nowrap">${new Date(x.ts).toLocaleString()}</td><td>${esc(x.who)}</td><td>${esc(x.what)}</td></tr>`).join("")||'<tr><td colspan="3" class="hint">Nothing yet</td></tr>'});
+run(async()=>{const me=await api("/api/me");$("#who").textContent=me.email+" · "+me.role})();
+loaders.rules();
+})();
+</script>
+</body>
+</html>

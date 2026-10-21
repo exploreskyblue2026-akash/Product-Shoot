@@ -1,0 +1,22 @@
+[1 STUDIO STANDARD — static]
+Professional e-commerce product photograph, 4:5 vertical, 2000x2500 px. STRICTLY SOFT, diffused light from a large soft source at upper-left (~45°), white fill opposite, soft feathered contact shadow, even exposure, neutral daylight white balance. No hard light, no direct sun, no glare.
+The product is the clear hero: ~70% of visual attention on the product, ~30% on set and props. Product sharpest and brightest element, never cropped, at least 8% margin. Props at true real-world scale, muted, supporting.
+
+[2 PRODUCT FIDELITY — static]
+Reproduce the product EXACTLY as in the reference image: {product_description}. Keep shape, proportions, colour ({product_colours}), finish, logo and label text ("{visible_text}") unchanged and readable, facing camera. Item count: {item_count}.
+
+[3 SHOT DIRECTION — static per shot]
+Shot {shot_no} of 5 — {shot_id}: {shot_purpose}.
+Camera: {shot_camera}. Framing: {shot_framing}. Depth of field: {shot_dof}.
+
+[4 SCENE — dynamic]
+Mood: {mood_name} — palette {mood_palette}; {mood_styling}.
+Set: {scene} on {surface}. Light ratio {light_ratio}, softness unchanged.
+{human_line}
+Props ({prop_count}): {props}.
+
+[5 BRAND — dynamic]
+Brand world: {brand_name}, {brand_positioning}. Brand colours {brand_palette}. Do: {brand_dos}. Don't: {brand_donts}.
+
+[6 NEGATIVE]
+Avoid: {negatives}.

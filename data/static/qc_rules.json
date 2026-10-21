@@ -1,0 +1,21 @@
+{
+  "_layer": "STATIC — automatic checks after each image. Any FAIL -> regenerate (max 2 retries) -> /Rejected + alert.",
+  "checks": [
+    {"id": "format", "type": "code", "rule": "exactly 2000x2500, 4:5, sRGB", "fail": "resize/crop or reject"},
+    {"id": "fidelity_shape", "type": "vision_llm", "rule": "product shape, proportions and item count match the raw image", "threshold": "pass/fail"},
+    {"id": "fidelity_colour", "type": "code", "rule": "mean product-region colour within Delta-E 5 of raw cut-out", "threshold": 5},
+    {"id": "label_text", "type": "ocr", "rule": "brand name and key label words in the output match OCR of the raw image", "threshold": "all brand words present, no new words"},
+    {"id": "similarity", "type": "embedding", "rule": "CLIP/DINO similarity of product crop vs raw cut-out", "threshold": 0.85},
+    {"id": "soft_light", "type": "vision_llm", "rule": "no hard-edged shadows, no specular hot spots, no direct sunlight look", "threshold": "pass/fail"},
+    {"id": "attention_70_30", "type": "vision_llm", "rule": "product is the clear focal point; frame-fill within the shot's range", "threshold": "pass/fail"},
+    {"id": "props", "type": "vision_llm", "rule": "prop count within shot limit, no branded props, no competitor products, realistic scale", "threshold": "pass/fail"},
+    {"id": "artifacts", "type": "vision_llm", "rule": "no extra text, watermark, sparkle mark, warped hands or geometry", "threshold": "pass/fail"},
+    {"id": "crop", "type": "code", "rule": "product mask does not touch frame edge; >= 8% margin", "threshold": 0.08}
+  ],
+  "retry_policy": {
+    "max_retries": 2,
+    "on_retry": "add the failed check's reason to the prompt as an explicit correction; keep the same seed scene",
+    "after_max": "move to /Rejected, set sheet status = needs_review, send daily summary"
+  },
+  "publish_gate": "all 5 shots PASS -> Shopify product status = draft. Switch to active only after the team approves the first 50 SKUs."
+}

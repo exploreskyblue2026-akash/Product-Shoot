@@ -1,0 +1,58 @@
+{
+  "_layer": "STATIC — applies to every product, every brand. Change only by studio decision.",
+  "version": "1.0",
+  "output": {
+    "aspect_ratio": "4:5",
+    "master_px": [2000, 2500],
+    "social_px": [1080, 1350],
+    "format": "jpg",
+    "colour_space": "sRGB",
+    "max_web_kb": 1000,
+    "images_per_sku": 5,
+    "one_set_per_colourway": true
+  },
+  "lighting": {
+    "rule": "STRICTLY SOFT. Large diffused source (softbox or overcast window light). No hard light, no direct sun, no specular hot spots, no harsh or hard-edged shadows.",
+    "key_direction": "soft side light from upper-left at ~45 degrees",
+    "fill": "white bounce opposite the key; shadow side stays open and detailed",
+    "shadow": "soft, feathered contact shadow directly under the product; fades out within a short distance",
+    "exposure": "even, bright but not blown; product highlights keep texture",
+    "white_balance": "neutral daylight ~5200-5600K; warm/cool mood comes from the set, never from tinting the product",
+    "allowed_variation_by_mood": "intensity and key/fill ratio only (bright-airy 1.5:1 up to moody-luxe 3:1); softness never changes"
+  },
+  "composition": {
+    "attention_split": "70/30 — ~70% of visual attention on the product, ~30% on props and set",
+    "product_frame_fill": {
+      "hero": "60-75% of frame area",
+      "detail": "70-90% (macro)",
+      "use_case": "35-55%",
+      "arrangement": "40-60% (product group)",
+      "lifestyle": "35-50%"
+    },
+    "placement": "centred for hero; centre or rule-of-thirds power point for the other shots",
+    "safe_margin_pct": 8,
+    "never_crop_product": true,
+    "negative_space_pct": "15-25, kept clean on one side for social text overlay (not on hero)",
+    "focus": "product is the sharpest element; props softer or with shallow depth of field",
+    "hierarchy": "product has the highest local contrast and brightness; props muted and in a supporting palette",
+    "prop_count": "odd numbers: 0 on hero, 3 or 5 elsewhere, never more than 5 distinct props",
+    "leading_lines": "edges, prop direction and shadows point toward the product",
+    "scale": "props at true real-world scale next to the product",
+    "label_rule": "logo and label face camera, upright, readable, undistorted",
+    "palette": "2-3 dominant colours plus neutrals; product colour defines one of them",
+    "thumbnail_test": "product must still be clearly identifiable at 300x375 px"
+  },
+  "product_fidelity": {
+    "rule": "The product must be reproduced EXACTLY from the reference: same shape, proportions, colour, finish, logo, label text, packaging and number of items.",
+    "preferred_mode": "composite — cut out the real product, generate only the set around it, then relight edges and shadow to match",
+    "never": ["change or invent label text", "recolour the product", "add or remove product parts or items", "add a second copy of the product (except arrangement shot of set contents)"]
+  },
+  "global_negative": [
+    "hard light", "harsh shadows", "direct sunlight", "specular glare", "blown highlights",
+    "extra text", "watermark", "AI sparkle mark", "logos on props", "competitor products",
+    "distorted or misspelled labels", "duplicate product", "cluttered set", "more than 5 props",
+    "warped geometry", "unrealistic scale", "cropped product", "heavy filters or colour grading on the product",
+    "hands with wrong finger count", "visible faces unless brand allows"
+  ],
+  "file_naming": "{SKU}_{colourway}_{shot_no}-{shot_id}.jpg  e.g. WAT-HEM-SSGT_steel_1-hero.jpg"
+}

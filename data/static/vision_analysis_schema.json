@@ -1,0 +1,33 @@
+{
+  "_layer": "STATIC — the JSON the vision LLM must return for every raw image before any prompt is built.",
+  "instruction": "Look at the raw product photo and the product-sheet row. Return ONLY this JSON. Use ids from the dataset tables; never invent new ids.",
+  "schema": {
+    "sku": "string",
+    "brand_id": "string — from brands.csv detect_keywords or sheet; '_default' if unknown",
+    "category_id": "string — from categories.csv",
+    "product_description": "one factual sentence: shape, colour, finish, packaging, visible text",
+    "visible_text": ["exact words printed on product/pack"],
+    "dominant_colours_hex": ["#xxxxxx", "#xxxxxx"],
+    "material": "string",
+    "is_set_or_kit": "boolean",
+    "item_count": "integer",
+    "price_tier": "value | mid | premium — from brand positioning + sheet price",
+    "mood_id": "chosen from: brand.mood_override > sheet.mood_override > category.default_moods (pick the one that best matches product colours)",
+    "surface": "chosen from category.surfaces filtered by mood.surfaces_preferred; must contrast with product colour",
+    "props": {
+      "use_case": ["3 prop_ids"],
+      "arrangement": ["0-3 prop_ids"],
+      "lifestyle": ["3-5 prop_ids"]
+    },
+    "human_mode": "from brand.human_allowed and category.human_mode",
+    "detail_mode": "macro | feature_callout — from category.material_is_visual",
+    "risks": ["e.g. small label text, reflective metal, transparent packaging"]
+  },
+  "selection_rules": [
+    "Priority: brand rules > sheet overrides > category defaults > studio default.",
+    "Surface must contrast with the product: dark product -> lighter surface (unless luxe_moody, then mid-tone with soft rim separation).",
+    "Props must match the chosen mood AND category; drop any prop listed in brand_donts.",
+    "Prefer props whose colours sit in the mood palette; never pick a prop the same colour as the product.",
+    "Never reuse the identical prop set for two SKUs of the same category in one batch — rotate."
+  ]
+}
