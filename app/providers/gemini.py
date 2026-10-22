@@ -47,19 +47,35 @@ class GeminiProvider:
         return self._resolved["names"]
 
     def _call(self, model: str, kind: str, **kw):
-        """Call the model; if Google says it doesn't exist for this key, switch to the closest available one."""
+        """Call a model with retries. Busy/limit errors (503, 429) wait and retry, then try another available
+        model of the same kind. 'Not found' switches to the closest available model straight away."""
+        import time
         model = self._resolved.get(model, model)
-        try:
-            return self.client.models.generate_content(model=model, **kw)
-        except Exception as e:
-            if "NOT_FOUND" not in str(e) and "404" not in str(e):
-                raise
-            alt = _pick(self._available(), kind)
-            if not alt or alt == model:
-                raise RuntimeError(f"Model {model} is not available to this API key and no replacement was found") from e
-            print(f"[gemini] {model} not available, using {alt}")
-            self._resolved[model] = alt
-            return self.client.models.generate_content(model=alt, **kw)
+        tried = [model]
+        while True:
+            for attempt in range(4):
+                try:
+                    return self.client.models.generate_content(model=model, **kw)
+                except Exception as e:
+                    msg = str(e)
+                    if "NOT_FOUND" in msg or " 404" in msg or msg.startswith("404"):
+                        break
+                    busy = any(t in msg for t in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded",
+                                                  "high demand", "500", "INTERNAL", "DEADLINE"))
+                    if not busy:
+                        raise
+                    if attempt < 3:
+                        wait = 8 * (2 ** attempt)          # 8s, 16s, 32s
+                        print(f"[gemini] {model} busy ({msg[:60]}), retrying in {wait}s")
+                        time.sleep(wait)
+            alt = _pick([n for n in self._available() if n not in tried], kind)
+            if not alt:
+                raise RuntimeError(f"{model}: Google says the model is busy or unavailable right now. "
+                                   "Click Generate now again in a few minutes.")
+            print(f"[gemini] switching {model} -> {alt}")
+            self._resolved[tried[0]] = alt
+            tried.append(alt)
+            model = alt
 
     def __init__(self):
         key = get_secret("GEMINI_API_KEY") or GEMINI_API_KEY
