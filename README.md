@@ -57,7 +57,7 @@ Tests: `pip install pytest && python -m pytest -q`
    - `SECRET_KEY` — a long random string; keep it stable (it also encrypts keys saved from Admin)
    - `OWNER_EMAIL`, `OWNER_PASSWORD` — the first owner login
    - `GEMINI_API_KEY`
-   - `MODEL_IMAGE_PRO`, `MODEL_IMAGE_FAST`, `MODEL_VISION` — check the exact model names in Google AI Studio
+   - `MODEL_VISION` (default `gemini-3.8-flash`), `MODEL_IMAGE_PRO` (default `gemini-3-pro-image`), `MODEL_IMAGE_FAST` (default `gemini-nano-banana-2.1`) — **Admin → Test Gemini** shows which models your key can use
    - `GOOGLE_SERVICE_ACCOUNT_JSON`, `OUTPUT_DRIVE_FOLDER_ID` — for Drive and Sheets
    - `SHOPIFY_STORE`, `SHOPIFY_ADMIN_TOKEN` — only when publishing to Shopify
 6. **Settings → Networking → Generate domain.** Open it, sign in, go to **Admin → API & models** and press **Test Gemini**, **Test Google Drive** and **Test Shopify**.

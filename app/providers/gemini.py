@@ -5,7 +5,9 @@ from PIL import Image
 from google import genai
 from google.genai import types
 
-from ..config import GEMINI_API_KEY, MODEL_VISION, IMAGE_SIZE
+from ..config import GEMINI_API_KEY, MODEL_VISION as _MV, IMAGE_SIZE, model_name
+
+MODEL_VISION = model_name(_MV)
 from ..secrets import get_secret
 
 QC_CHECKS = ["shape_match", "colour_match", "label_text", "soft_light", "attention_70_30",
@@ -33,9 +35,13 @@ class GeminiProvider:
         self.client = genai.Client(api_key=key)
 
     def test(self) -> str:
-        names = [m.name for m in self.client.models.list()]
-        imgs = [n for n in names if "image" in n]
-        return f"{len(names)} models available; image models: {', '.join(n.split('/')[-1] for n in imgs[:6]) or 'none listed'}"
+        from .. import config
+        names = sorted(m.name.split("/")[-1] for m in self.client.models.list())
+        need = {"vision": MODEL_VISION, "image pro": model_name(config.MODEL_IMAGE_PRO), "image fast": model_name(config.MODEL_IMAGE_FAST)}
+        status = "; ".join(f"{k}: {v} {'OK' if v in names else 'NOT AVAILABLE to this key'}" for k, v in need.items())
+        imgs = [n for n in names if "image" in n or "banana" in n]
+        flash = [n for n in names if "flash" in n and "image" not in n][:8]
+        return f"Key works. {status}.\nImage models for this key: {', '.join(imgs) or 'none'}.\nVision/flash models: {', '.join(flash)}"
 
     def analyse(self, raw: bytes, context: dict) -> dict:
         prompt = (
@@ -53,7 +59,7 @@ class GeminiProvider:
 
     def generate(self, prompt: str, raw: bytes, model: str) -> bytes:
         r = self.client.models.generate_content(
-            model=model,
+            model=model_name(model),
             contents=[types.Part.from_bytes(data=raw, mime_type=_mime(raw)),
                       "Reference image above is the real product. " + prompt],
             config=types.GenerateContentConfig(

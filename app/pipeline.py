@@ -43,7 +43,7 @@ def analyse(s: Session, p: Product, prov, raw: bytes):
         "product": {"code": p.code, "name": p.name, "brand_id": p.brand_id, "category_id": p.category_id, **(p.data or {})},
     }
     a = prov.analyse(raw, ctx)
-    _charge(s, p, "vision", config.MODEL_VISION, config.COST_VISION)
+    _charge(s, p, "vision", config.model_name(config.MODEL_VISION), config.COST_VISION)
     p.analysis = a
     if not p.brand_id and a.get("brand_id") and a["brand_id"] != "_default":
         p.brand_id = a["brand_id"]
@@ -78,7 +78,7 @@ def process(pid: int, only: list[int] | None = None):
         for no in sorted(todo):
             sh = shots[no]
             spec = prompts[no]
-            model = get_setting(s, spec["model_setting"], config.MODEL_IMAGE_FAST)
+            model = config.model_name(get_setting(s, spec["model_setting"], config.MODEL_IMAGE_FAST))
             sh.status, sh.prompt, sh.model, sh.rule_version, sh.qc = "gen", spec["prompt"], model, rv.version, {}
             s.commit()
             prompt = spec["prompt"]
@@ -89,7 +89,7 @@ def process(pid: int, only: list[int] | None = None):
                 _charge(s, p, "image", model, _cost_for(model), sh)
                 rel = storage.save(f"shots/{storage.safe(p.code)}/{no}-{sh.kind}-a{sh.attempts}.jpg", img)
                 result = prov.qc(raw, img, {"kind": sh.kind, "no": no}, rv.data)
-                _charge(s, p, "qc", config.MODEL_VISION, config.COST_VISION, sh)
+                _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
                 sh.image_path, sh.qc = rel, result
                 s.commit()
                 if all(result["checks"].values()):
