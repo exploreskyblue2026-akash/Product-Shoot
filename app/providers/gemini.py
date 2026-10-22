@@ -52,12 +52,21 @@ class GeminiProvider:
         import time
         model = self._resolved.get(model, model)
         tried = [model]
+        last = ""
         while True:
             for attempt in range(4):
                 try:
                     return self.client.models.generate_content(model=model, **kw)
                 except Exception as e:
                     msg = str(e)
+                    last = f"{model}: {msg[:300]}"
+                    low = msg.lower()
+                    if ("429" in msg or "resource_exhausted" in low) and ("limit: 0" in low or "free_tier" in low
+                                                                         or "billing" in low or "quota" in low):
+                        raise RuntimeError(
+                            "Gemini quota: this API key has no image-generation quota (free tier allows 0 for image "
+                            "models). Fix: Google AI Studio → API keys → set up billing on the key's project, then "
+                            f"click Generate now. Google said: {msg[:200]}") from e
                     if "NOT_FOUND" in msg or " 404" in msg or msg.startswith("404"):
                         break
                     busy = any(t in msg for t in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded",
@@ -70,8 +79,9 @@ class GeminiProvider:
                         time.sleep(wait)
             alt = _pick([n for n in self._available() if n not in tried], kind)
             if not alt:
-                raise RuntimeError(f"{model}: Google says the model is busy or unavailable right now. "
-                                   "Click Generate now again in a few minutes.")
+                raise RuntimeError("Every available Gemini model refused the request. Last reply from Google — "
+                                   f"{last}. If this says quota/429, enable billing on the key's project in "
+                                   "Google AI Studio; if it says 503, Google is overloaded, try again later.")
             print(f"[gemini] switching {model} -> {alt}")
             self._resolved[tried[0]] = alt
             tried.append(alt)
