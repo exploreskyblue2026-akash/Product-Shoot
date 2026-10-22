@@ -83,7 +83,8 @@ def files(rel: str, u=Depends(need("viewer"))):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "provider": config.PROVIDER, "worker": config.RUN_WORKER}
+    return {"ok": True, "version": config.APP_VERSION, "provider": config.PROVIDER, "worker": config.RUN_WORKER,
+            "vision_model": config.model_name(config.MODEL_VISION)}
 
 
 # ---------------------------------------------------------------- auth

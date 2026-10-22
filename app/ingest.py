@@ -16,7 +16,7 @@ CODE_RE = re.compile(r"\b[A-Z]{2,6}[-_][A-Z0-9]{2,}(?:-[A-Z0-9]{2,})*\b")
 
 
 def code_from_filename(name: str) -> tuple[str, str]:
-    stem = re.sub(r"\.[A-Za-z0-9]+$", "", name.split("/")[-1])
+    stem = re.sub(r"(\.(jpe?g|png|webp|heic|tiff?))+$", "", name.split("/")[-1], flags=re.I)
     parts = stem.split("_")
     code = parts[0].strip().upper()
     angle = parts[1].lower() if len(parts) > 1 else ""

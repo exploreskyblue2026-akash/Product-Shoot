@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 
+APP_VERSION = "1.2.0 (models: 3.8-flash / 3-pro-image / nano-banana-2.1)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

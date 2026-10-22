@@ -27,7 +27,40 @@ def _json(text: str) -> dict:
     return json.loads(t)
 
 
+def _pick(names: list[str], kind: str) -> str | None:
+    bad = ("tts", "live", "embedding", "transcribe", "robotics", "lite", "aqa", "omni")
+    if kind == "image":
+        pref = [n for n in names if ("banana" in n or "image" in n) and "imagen" not in n]
+        pref.sort(key=lambda n: (0 if "banana" in n else 1 if "pro-image" in n else 2, n), reverse=False)
+        return pref[0] if pref else None
+    pref = [n for n in names if "flash" in n and "image" not in n and not any(b in n for b in bad)]
+    pref.sort(reverse=True)
+    return pref[0] if pref else None
+
+
 class GeminiProvider:
+    _resolved: dict = {}
+
+    def _available(self) -> list[str]:
+        if "names" not in self._resolved:
+            self._resolved["names"] = [m.name.split("/")[-1] for m in self.client.models.list()]
+        return self._resolved["names"]
+
+    def _call(self, model: str, kind: str, **kw):
+        """Call the model; if Google says it doesn't exist for this key, switch to the closest available one."""
+        model = self._resolved.get(model, model)
+        try:
+            return self.client.models.generate_content(model=model, **kw)
+        except Exception as e:
+            if "NOT_FOUND" not in str(e) and "404" not in str(e):
+                raise
+            alt = _pick(self._available(), kind)
+            if not alt or alt == model:
+                raise RuntimeError(f"Model {model} is not available to this API key and no replacement was found") from e
+            print(f"[gemini] {model} not available, using {alt}")
+            self._resolved[model] = alt
+            return self.client.models.generate_content(model=alt, **kw)
+
     def __init__(self):
         key = get_secret("GEMINI_API_KEY") or GEMINI_API_KEY
         if not key:
@@ -51,15 +84,13 @@ class GeminiProvider:
             f"Allowed mood_id: {context['moods']}\nAllowed prop ids per category: {json.dumps(context['props'])}\n"
             f"Product data: {json.dumps(context['product'])}\nSelection rules: {json.dumps(context['rules'])}"
         )
-        r = self.client.models.generate_content(
-            model=MODEL_VISION,
+        r = self._call(MODEL_VISION, "vision",
             contents=[types.Part.from_bytes(data=raw, mime_type=_mime(raw)), prompt],
             config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2))
         return _json(r.text)
 
     def generate(self, prompt: str, raw: bytes, model: str) -> bytes:
-        r = self.client.models.generate_content(
-            model=model_name(model),
+        r = self._call(model_name(model), "image",
             contents=[types.Part.from_bytes(data=raw, mime_type=_mime(raw)),
                       "Reference image above is the real product. " + prompt],
             config=types.GenerateContentConfig(
@@ -83,8 +114,7 @@ class GeminiProvider:
             "attention_70_30: product is the clear focal point. props_ok: at most 5 props, none branded, realistic scale. "
             "no_artifacts: no extra text, watermark, warped hands or geometry. margin_ok: product not cropped, clear margin."
         )
-        r = self.client.models.generate_content(
-            model=MODEL_VISION,
+        r = self._call(MODEL_VISION, "vision",
             contents=[types.Part.from_bytes(data=raw, mime_type=_mime(raw)),
                       types.Part.from_bytes(data=gen, mime_type=_mime(gen)), prompt],
             config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0))
