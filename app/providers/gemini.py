@@ -57,17 +57,22 @@ class GeminiProvider:
         while True:
             for attempt in range(3):
                 try:
-                    return self.client.models.generate_content(model=model, **kw)
+                    r = self.client.models.generate_content(model=model, **kw)
+                    self.last_model = model
+                    return r
                 except Exception as e:
                     msg = str(e)
                     last = f"{model}: {msg[:300]}"
                     low = msg.lower()
-                    if ("429" in msg or "resource_exhausted" in low) and ("limit: 0" in low or "free_tier" in low
-                                                                         or "billing" in low or "quota" in low):
-                        raise RuntimeError(
-                            "Gemini quota: this API key has no image-generation quota (free tier allows 0 for image "
-                            "models). Fix: Google AI Studio → API keys → set up billing on the key's project, then "
-                            f"click Generate now. Google said: {msg[:200]}") from e
+                    is429 = "429" in msg or "resource_exhausted" in low
+                    if is429 and ("limit: 0" in low or "free_tier" in low):
+                        # this model has no quota on this key/tier: treat like "not available", try the next model
+                        print(f"[gemini] {model} has no quota on this key: {msg[:160]}")
+                        break
+                    if is429 and attempt < 2:
+                        print(f"[gemini] {model} rate-limited, waiting 30s: {msg[:120]}")
+                        time.sleep(30)
+                        continue
                     if "NOT_FOUND" in msg or " 404" in msg or msg.startswith("404"):
                         break
                     busy = any(t in msg for t in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded",
@@ -80,9 +85,7 @@ class GeminiProvider:
                         time.sleep(wait)
             alt = _pick([n for n in self._available() if n not in tried], kind)
             if not alt:
-                raise RuntimeError("Every available Gemini model refused the request. Last reply from Google — "
-                                   f"{last}. If this says quota/429, enable billing on the key's project in "
-                                   "Google AI Studio; if it says 503, Google is overloaded, try again later.")
+                raise RuntimeError(f"Google refused every model tried ({', '.join(tried)}). Google's reply: {last}")
             print(f"[gemini] switching {model} -> {alt}")
             self._resolved[tried[0]] = alt
             tried.append(alt)

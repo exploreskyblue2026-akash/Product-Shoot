@@ -112,7 +112,9 @@ def process(pid: int, only: list[int] | None = None):
                     break
                 sh.attempts = (sh.attempts or 0) + 1
                 img = storage.to_output(prov.generate(prompt, raw, model, size))
-                _charge(s, p, "image", model, config.image_cost(model, size), sh)
+                used = getattr(prov, "last_model", None) or model     # may differ after a fallback
+                sh.model = used
+                _charge(s, p, "image", used, config.image_cost(used, size), sh)
                 rel = storage.save(f"shots/{storage.safe(p.code)}/{no}-{sh.kind}-a{sh.attempts}.jpg", img)
                 result = prov.qc(raw, img, {"kind": sh.kind, "no": no}, rv.data)
                 _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
