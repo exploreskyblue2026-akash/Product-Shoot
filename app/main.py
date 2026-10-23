@@ -159,6 +159,8 @@ def state(u=Depends(need("viewer"))):
             "user": {"email": u.email, "role": u.role},
             "autopilot": {k: get_setting(s, k) for k in ("autopilot", "auto_approve", "retries", "publish_shopify")},
             "spend_today": round(spend_today, 2), "spend_month": round(pipeline.month_spend(s), 2),
+            "usd_inr": get_setting(s, "usd_inr", 88.0), "daily_budget": get_setting(s, "daily_budget", 3.0),
+            "cost_mode": get_setting(s, "cost_mode", "economy"),
             "budget": get_setting(s, "budget_month", 150),
             "sources": [{"id": x.id, "type": x.type, "name": x.name, "detail": x.detail, "watch": x.watch,
                          "status": x.status, "error": x.error, "count": counts.get(x.id, 0)} for x in srcs],
@@ -489,7 +491,8 @@ def test_conn(what: str, u=Depends(need("admin"))):
 
 
 SETTING_KEYS = ["auto_approve", "retries", "publish_shopify", "budget_month", "budget_action", "model_hero_detail",
-                "model_other", "file_naming", "min_raw_px", "output_drive_folder"]
+                "model_other", "file_naming", "min_raw_px", "output_drive_folder", "cost_mode", "default_shots",
+                "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr"]
 
 
 @app.get("/api/admin/settings")
@@ -606,7 +609,7 @@ def usage(u=Depends(need("admin"))):
         shots = list(s.scalars(select(Shot).where(Shot.image_path != "")))
         first_pass = sum(1 for sh in shots if sh.attempts == 1 and sh.status in ("pass", "approved"))
         spend = pipeline.month_spend(s)
-        return {"spend_month": round(spend, 2), "budget": get_setting(s, "budget_month", 150), "images": images,
+        return {"usd_inr": get_setting(s, "usd_inr", 88.0), "spend_month": round(spend, 2), "budget": get_setting(s, "budget_month", 150), "images": images,
                 "saved_products": saved, "cost_per_product": round(spend / saved, 2) if saved else 0,
                 "first_pass_rate": round(100 * first_pass / len(shots)) if shots else 0,
                 "by_model": [{"model": m, "cost": round(c or 0, 2), "calls": n} for m, c, n in by_model]}

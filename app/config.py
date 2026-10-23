@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "1.2.0 (models: 3.8-flash / 3-pro-image / nano-banana-2.1)"
+APP_VERSION = "1.3.0 (cost controls: economy mode, hero-first, no auto-retries)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
@@ -36,6 +36,26 @@ IMAGE_SIZE = env("IMAGE_SIZE", "2K")              # 1K | 2K | 4K
 COST_IMAGE_PRO = float(env("COST_IMAGE_PRO", "0.134"))
 COST_IMAGE_FAST = float(env("COST_IMAGE_FAST", "0.05"))
 COST_VISION = float(env("COST_VISION", "0.002"))
+MODEL_IMAGE_LITE = env("MODEL_IMAGE_LITE", "gemini-3.1-flash-lite-image")
+COST_IMAGE_LITE = float(env("COST_IMAGE_LITE", "0.02"))
+# Estimated USD per image by model + size. Check Google's pricing page and override with COST_* variables.
+SIZE_FACTOR = {"1K": 1.0, "2K": 1.5, "4K": 2.5}
+COST_MODES = {
+    # mode: (model for hero/detail, model for other shots, image size)
+    "economy":  ("lite", "lite", "1K"),
+    "standard": ("fast", "fast", "1K"),
+    "premium":  ("pro", "fast", "2K"),
+}
+
+
+def mode_model(kind: str) -> str:
+    return {"lite": MODEL_IMAGE_LITE, "fast": MODEL_IMAGE_FAST, "pro": MODEL_IMAGE_PRO}[kind]
+
+
+def image_cost(model: str, size: str = "1K") -> float:
+    m = model_name(model)
+    base = COST_IMAGE_PRO if "pro" in m else COST_IMAGE_LITE if "lite" in m else COST_IMAGE_FAST
+    return round(base * SIZE_FACTOR.get(size, 1.0), 4)
 
 # --- Google Drive / Sheets (service account JSON pasted as one line) ----
 GOOGLE_SERVICE_ACCOUNT_JSON = env("GOOGLE_SERVICE_ACCOUNT_JSON")

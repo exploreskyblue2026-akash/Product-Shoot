@@ -28,8 +28,25 @@ def _charge(s: Session, p: Product, kind: str, model: str, cost: float, shot: Sh
         shot.cost = (shot.cost or 0) + cost
 
 
-def _cost_for(model: str) -> float:
-    return config.COST_IMAGE_PRO if "pro" in model else config.COST_IMAGE_FAST
+CRITICAL = ("shape_match", "label_text", "no_artifacts")
+
+
+def _passed(result: dict, mode: str) -> bool:
+    checks = result.get("checks", {})
+    keys = CRITICAL if mode == "light" else checks.keys()
+    return all(checks.get(k, True) for k in keys)
+
+
+def day_spend(s: Session) -> float:
+    start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return float(s.scalar(select(func.coalesce(func.sum(Usage.cost), 0.0)).where(Usage.ts >= start)) or 0.0)
+
+
+def _model_for(s: Session, kind: str) -> tuple[str, str]:
+    mode = get_setting(s, "cost_mode", "economy")
+    hero_m, other_m, size = config.COST_MODES.get(mode, config.COST_MODES["economy"])
+    pick = hero_m if kind in ("hero", "detail") else other_m
+    return config.model_name(config.mode_model(pick)), size
 
 
 def analyse(s: Session, p: Product, prov, raw: bytes):
@@ -73,35 +90,56 @@ def process(pid: int, only: list[int] | None = None):
         s.commit()
         notes = {sh.no: sh.note for sh in shots.values() if sh.note}
         prompts = {x["no"]: x for x in build_prompts(s, p, p.analysis or {}, rv, notes)}
-        retries = int(get_setting(s, "retries", 2))
-        todo = only or [no for no, sh in shots.items() if sh.status in ("wait", "gen", "fail") or not sh.image_path]
+        retries = int(get_setting(s, "retries", 0))
+        qc_mode = get_setting(s, "qc_mode", "light")
+        cap = float(get_setting(s, "max_cost_product", 0.30))
+        hero_gate = bool(get_setting(s, "hero_gate", True))
+        defaults = [int(x) for x in (get_setting(s, "default_shots", [1]) or [1])]
+        todo = only or [no for no in defaults if shots[no].status in ("wait", "gen", "fail") or not shots[no].image_path]
+        stop_reason = ""
         for no in sorted(todo):
             sh = shots[no]
             spec = prompts[no]
-            model = config.model_name(get_setting(s, spec["model_setting"], config.MODEL_IMAGE_FAST))
+            model, size = _model_for(s, sh.kind)
             sh.status, sh.prompt, sh.model, sh.rule_version, sh.qc = "gen", spec["prompt"], model, rv.version, {}
             s.commit()
             prompt = spec["prompt"]
             result = None
             for attempt in range(retries + 1):
+                est = config.image_cost(model, size) + config.COST_VISION
+                if p.cost + est > cap:
+                    stop_reason = f"Stopped at the ${cap:.2f} per-product cost limit"
+                    break
                 sh.attempts = (sh.attempts or 0) + 1
-                img = storage.to_output(prov.generate(prompt, raw, model))
-                _charge(s, p, "image", model, _cost_for(model), sh)
+                img = storage.to_output(prov.generate(prompt, raw, model, size))
+                _charge(s, p, "image", model, config.image_cost(model, size), sh)
                 rel = storage.save(f"shots/{storage.safe(p.code)}/{no}-{sh.kind}-a{sh.attempts}.jpg", img)
                 result = prov.qc(raw, img, {"kind": sh.kind, "no": no}, rv.data)
                 _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
                 sh.image_path, sh.qc = rel, result
                 s.commit()
-                if all(result["checks"].values()):
+                if _passed(result, qc_mode):
                     break
-                failed = [f"{k}: {result['reasons'].get(k, 'failed')}" for k, v in result["checks"].items() if not v]
+                failed = [f"{k}: {result['reasons'].get(k, 'failed')}" for k, v in result["checks"].items()
+                          if not v and (qc_mode != "light" or k in CRITICAL)]
                 prompt = spec["prompt"] + "\n\n[CORRECTION — previous attempt failed QC]\nFix: " + "; ".join(failed)
-            sh.status = "pass" if all(result["checks"].values()) else "fail"
+            if result is None:
+                sh.status = "wait"
+            else:
+                sh.status = "pass" if _passed(result, qc_mode) else "fail"
             sh.note = ""
             s.commit()
+            if stop_reason:
+                break
+            if hero_gate and no == 1 and sh.status == "fail" and not only:
+                stop_reason = "Hero failed QC, other shots not generated (saves credits)"
+                break
+        p.error = stop_reason
+        s.commit()
         s.refresh(p)
-        all_pass = len(p.shots) == 5 and all(sh.status in ("pass", "approved") for sh in p.shots)
-        if all_pass and get_setting(s, "auto_approve", True) and get_setting(s, "autopilot", False):
+        made = [sh for sh in p.shots if sh.image_path]
+        all_pass = bool(made) and all(sh.status in ("pass", "approved") for sh in made)
+        if all_pass and not p.error and get_setting(s, "auto_approve", True) and get_setting(s, "autopilot", False):
             approve(s, p, "autopilot")
         else:
             p.stage = "review"
@@ -157,13 +195,19 @@ def next_job(s: Session) -> int | None:
     """Manual 'run now' jobs first; otherwise the oldest queued product while autopilot is on."""
     for p in s.scalars(select(Product).where(Product.stage.in_(["queue", "gen"])).order_by(Product.id)):
         if (p.data or {}).get("run_now"):
+            if day_spend(s) >= float(get_setting(s, "daily_budget", 3.0)):
+                p.data, p.stage = {k: v for k, v in p.data.items() if k not in ("run_now", "only_shots")}, "error"
+                p.error = "Daily budget reached. Raise it in Admin → Autopilot rules or wait until tomorrow."
+                s.commit()
+                return None
             return p.id
     if not get_setting(s, "autopilot", False):
         return None
-    if get_setting(s, "budget_action", "pause") == "pause" and month_spend(s) >= float(get_setting(s, "budget_month", 150)):
+    over_day = day_spend(s) >= float(get_setting(s, "daily_budget", 3.0))
+    if over_day or (get_setting(s, "budget_action", "pause") == "pause" and month_spend(s) >= float(get_setting(s, "budget_month", 150))):
         from .db import set_setting
         set_setting(s, "autopilot", False)
-        log(s, "system", "Autopilot paused: monthly budget reached")
+        log(s, "system", "Autopilot paused: " + ("daily" if over_day else "monthly") + " budget reached")
         s.commit()
         return None
     p = s.scalars(select(Product).where(Product.stage.in_(["gen", "queue"])).order_by(Product.stage.asc(), Product.id)).first()  # "gen" (resume) before "queue"

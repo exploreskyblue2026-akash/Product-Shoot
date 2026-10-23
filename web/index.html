@@ -126,7 +126,7 @@ body{margin:0}[hidden]{display:none!important}
       </div>
       <div class="auto-opts">
         <label><input type="checkbox" id="o-approve" checked>Auto-approve when QC passes</label>
-        <label><input type="checkbox" id="o-retry" checked>Retry failed shots twice</label>
+        <label><input type="checkbox" id="o-retry">Retry failed shots once (costs extra)</label>
         <label><input type="checkbox" id="o-shopify">Also publish to Shopify (draft)</label>
       </div>
     </section>
@@ -225,7 +225,7 @@ function renderLeft(){
   const a=S.autopilot;$("#ap").setAttribute("aria-checked",!!a.autopilot);$("#ap-label").textContent=a.autopilot?"On · working through the queue":"Off · start the queue";
   $("#o-approve").checked=!!a.auto_approve;$("#o-shopify").checked=!!a.publish_shopify;$("#o-retry").checked=(a.retries||0)>0;
   $("#s-queue").textContent=S.queue.filter(q=>q.stage=="queue"||q.stage=="gen").length;$("#s-saved").textContent=S.saved.length;$("#s-rev").textContent=S.queue.filter(q=>q.stage=="review"||q.stage=="error").length;
-  $("#spend").textContent="$"+S.spend_today.toFixed(2)+" today";
+  $("#spend").textContent="₹"+Math.round(S.spend_today*(S.usd_inr||88))+" / ₹"+Math.round(S.daily_budget*(S.usd_inr||88))+" today";
   $("#repo-n").textContent=S.sources.length;
   $("#repos").innerHTML=S.sources.map(r=>`<div class="li"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${IC[r.type]||IC.url}</svg></span><span style="min-width:0"><b>${esc(r.name)}</b><small title="${esc(r.error||r.detail)}">${esc(r.status=="error"?"Error: "+r.error:r.status=="new"?"Scanning…":r.detail)}</small></span><span class="chip ${r.status=="error"?"bad":r.watch?"info":"mute"}">${r.count}${r.watch?" · watching":""}</span></div>`).join("")||'<div class="empty">No inputs yet</div>';
   const chip=q=>({gen:`<span class="chip info">${q.done}/5</span>`,review:'<span class="chip warn">Review</span>',error:'<span class="chip bad">Error</span>',needs_photo:'<span class="chip mute">No photo</span>'})[q.stage]||'<span class="chip mute">Waiting</span>';
@@ -249,7 +249,7 @@ function renderStage(){
   $("#qc").innerHTML=c?Object.entries(c).map(([k,ok])=>`<li title="${esc(why[k]||"")}"><span class="${ok?"y":"n"}" aria-hidden="true">${ok?"✓":"✕"}</span>${QCL[k]||k}${ok?"":`<span class="hint">&nbsp;${esc(why[k]||"")}</span>`}<span class="sr">${ok?" passed":" failed"}</span></li>`).join(""):'<li class="hint">Checks run when the shot is generated.</li>';
   $("#qc-score").textContent=c?Object.values(c).filter(Boolean).length+"/"+Object.keys(c).length+(s.attempts>1?" · "+s.attempts+" tries":""):"";
   const has=P.shots.some(x=>x.image),idle=P.stage!="gen";
-  $("#actions").innerHTML=`${P.stage=="queue"||P.stage=="error"?`<button class="btn primary" type="button" data-act="run">Generate now</button>`:""}<button class="btn ${P.stage=="queue"||P.stage=="error"?"":"primary"}" type="button" data-act="approve" ${P.stage=="review"&&has?"":"disabled"}>Approve all &amp; save</button><button class="btn" type="button" data-act="regen" ${idle&&has?"":"disabled"}>Regenerate shot ${sel+1}</button><button class="btn" type="button" data-act="skip">Next product</button><button class="btn danger" type="button" data-act="reject" ${idle?"":"disabled"}>Reject product</button>`}
+  $("#actions").innerHTML=`${P.stage=="queue"||P.stage=="error"?`<button class="btn primary" type="button" data-act="run">Generate now</button>`:""}<button class="btn ${P.stage=="queue"||P.stage=="error"?"":"primary"}" type="button" data-act="approve" ${P.stage=="review"&&has?"":"disabled"}>Approve all &amp; save</button><button class="btn" type="button" data-act="regen" ${idle&&(has||P.stage!="queue")?"":"disabled"}>${P.shots[sel].image?"Regenerate":"Generate"} shot ${sel+1}</button><button class="btn" type="button" data-act="skip">Next product</button><button class="btn danger" type="button" data-act="reject" ${idle?"":"disabled"}>Reject product</button>`}
 
 async function act(kind){if(busy||!P)return;busy=true;try{
   if(kind=="run"){await api(`/api/products/${P.id}/run`,{method:"POST"});toast("Started "+P.code)}
@@ -267,7 +267,7 @@ async function setAuto(body){try{await api("/api/autopilot",{method:"POST",body}
 $("#ap").addEventListener("click",()=>{const on=$("#ap").getAttribute("aria-checked")!=="true";setAuto({autopilot:on});toast(on?"Autopilot on":"Autopilot off")});
 $("#o-approve").addEventListener("change",e=>setAuto({auto_approve:e.target.checked}));
 $("#o-shopify").addEventListener("change",e=>setAuto({publish_shopify:e.target.checked}));
-$("#o-retry").addEventListener("change",e=>setAuto({retries:e.target.checked?2:0}));
+$("#o-retry").addEventListener("change",e=>setAuto({retries:e.target.checked?1:0}));
 document.querySelectorAll(".type").forEach(t=>t.addEventListener("click",()=>{document.querySelectorAll(".type").forEach(x=>x.setAttribute("aria-checked","false"));t.setAttribute("aria-checked","true");curType=t.dataset.type;const T=TYPE[curType];
   $("#f-link").hidden=curType=="files";$("#f-files").hidden=!(curType=="files"||curType=="catalogue");if(T[0]){$("#in-link-l").textContent=T[0];$("#in-link").placeholder=T[1]}$("#in-code").selectedIndex=T[2]}));
 $("#in-files").addEventListener("change",e=>{picked=[...e.target.files];$("#picked").textContent=picked.length?picked.length+" file(s) ready":"Name photos CODE_angle.jpg"});

@@ -30,8 +30,9 @@ def _json(text: str) -> dict:
 def _pick(names: list[str], kind: str) -> str | None:
     bad = ("tts", "live", "embedding", "transcribe", "robotics", "lite", "aqa", "omni")
     if kind == "image":
-        pref = [n for n in names if ("banana" in n or "image" in n) and "imagen" not in n]
-        pref.sort(key=lambda n: (0 if "banana" in n else 1 if "pro-image" in n else 2, n), reverse=False)
+        # cheapest first; never switch to the Pro image model automatically
+        pref = [n for n in names if ("banana" in n or "image" in n) and "imagen" not in n and "pro" not in n]
+        pref.sort(key=lambda n: (0 if "lite" in n else 1 if "banana" in n else 2, n))
         return pref[0] if pref else None
     pref = [n for n in names if "flash" in n and "image" not in n and not any(b in n for b in bad)]
     pref.sort(reverse=True)
@@ -54,7 +55,7 @@ class GeminiProvider:
         tried = [model]
         last = ""
         while True:
-            for attempt in range(4):
+            for attempt in range(3):
                 try:
                     return self.client.models.generate_content(model=model, **kw)
                 except Exception as e:
@@ -73,8 +74,8 @@ class GeminiProvider:
                                                   "high demand", "500", "INTERNAL", "DEADLINE"))
                     if not busy:
                         raise
-                    if attempt < 3:
-                        wait = 8 * (2 ** attempt)          # 8s, 16s, 32s
+                    if attempt < 2:
+                        wait = 10 * (2 ** attempt)         # 10s, 20s (a refused call is not billed)
                         print(f"[gemini] {model} busy ({msg[:60]}), retrying in {wait}s")
                         time.sleep(wait)
             alt = _pick([n for n in self._available() if n not in tried], kind)
@@ -115,13 +116,13 @@ class GeminiProvider:
             config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2))
         return _json(r.text)
 
-    def generate(self, prompt: str, raw: bytes, model: str) -> bytes:
+    def generate(self, prompt: str, raw: bytes, model: str, size: str = IMAGE_SIZE) -> bytes:
         r = self._call(model_name(model), "image",
             contents=[types.Part.from_bytes(data=raw, mime_type=_mime(raw)),
                       "Reference image above is the real product. " + prompt],
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE"],
-                image_config=types.ImageConfig(aspect_ratio="4:5", image_size=IMAGE_SIZE)))
+                image_config=types.ImageConfig(aspect_ratio="4:5", image_size=size)))
         for cand in r.candidates or []:
             for part in (cand.content.parts if cand.content else []) or []:
                 if part.inline_data and part.inline_data.data:

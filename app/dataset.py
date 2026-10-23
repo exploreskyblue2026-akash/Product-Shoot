@@ -15,7 +15,14 @@ DEFAULT_STRENGTH = {"lighting": "strict", "attention": "normal", "size": "normal
 DEFAULT_SETTINGS = {
     "autopilot": False,
     "auto_approve": True,          # approve when every QC check passes
-    "retries": 2,
+    "retries": 0,                  # automatic regenerations after a QC fail (each one costs a full image)
+    "cost_mode": "economy",        # economy | standard | premium  (model + resolution per shot)
+    "default_shots": [1],          # shots generated automatically; others on demand from the studio
+    "max_cost_product": 0.30,      # USD hard cap per product (images + checks)
+    "daily_budget": 3.0,           # USD per day; autopilot pauses when reached
+    "hero_gate": True,             # if the hero fails QC, don't generate the other shots
+    "qc_mode": "light",            # light: only shape / label / artefacts can fail a shot; full: all 8 checks
+    "usd_inr": 88.0,
     "publish_shopify": False,
     "budget_month": 150.0,
     "budget_action": "pause",      # pause | alert
