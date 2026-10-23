@@ -73,6 +73,10 @@ class GeminiProvider:
                         print(f"[gemini] {model} rate-limited, waiting 30s: {msg[:120]}")
                         time.sleep(30)
                         continue
+                    if ("400" in msg or "INVALID_ARGUMENT" in msg) and "models/" in msg and (
+                            "not found" in low or "not supported" in low or "is not" in low or "unsupported" in low):
+                        print(f"[gemini] {model} rejected as a model: {msg[:160]}")
+                        break
                     if "NOT_FOUND" in msg or " 404" in msg or msg.startswith("404"):
                         break
                     busy = any(t in msg for t in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded",

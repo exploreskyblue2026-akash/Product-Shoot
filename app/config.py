@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "1.3.1 (falls back when a model has no quota)"
+APP_VERSION = "1.3.2 (retired model names auto-replaced)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
@@ -81,4 +81,9 @@ MODEL_ALIASES = {
 
 
 def model_name(name: str) -> str:
-    return MODEL_ALIASES.get((name or "").strip(), (name or "").strip())
+    n = (name or "").strip().removeprefix("models/")
+    if n in MODEL_ALIASES:
+        return MODEL_ALIASES[n]
+    if n.startswith(("gemini-2.", "gemini-1.")):          # any retired 1.x / 2.x name, incl. -preview / -001 variants
+        return "gemini-nano-banana-2.1" if "image" in n else "gemini-3.8-flash"
+    return n
