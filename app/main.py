@@ -139,7 +139,7 @@ def img_url(rel: str) -> str:
 
 
 def product_brief(p: Product) -> dict:
-    done = sum(1 for sh in p.shots if sh.status in ("pass", "fail", "approved"))
+    done = sum(1 for sh in p.shots if sh.status in ("pass", "fail", "approved", "unchecked"))
     return {"id": p.id, "code": p.code, "name": p.name, "brand": p.brand_id, "stage": p.stage, "done": done,
             "error": p.error, "updated": p.updated.isoformat() if p.updated else ""}
 

@@ -31,11 +31,13 @@ def _pick(names: list[str], kind: str) -> str | None:
     bad = ("tts", "live", "embedding", "transcribe", "robotics", "lite", "aqa", "omni")
     if kind == "image":
         # cheapest first; never switch to the Pro image model automatically
-        pref = [n for n in names if ("banana" in n or "image" in n) and "imagen" not in n and "pro" not in n]
+        pref = [n for n in names if ("banana" in n or "image" in n) and "imagen" not in n and "pro" not in n
+            and not n.startswith(("gemini-1.", "gemini-2."))]
         pref.sort(key=lambda n: (0 if "lite" in n else 1 if "banana" in n else 2, n))
         return pref[0] if pref else None
-    pref = [n for n in names if "flash" in n and "image" not in n and not any(b in n for b in bad)]
-    pref.sort(reverse=True)
+    pref = [n for n in names if "flash" in n and "image" not in n and not any(b in n for b in bad)
+            and not n.startswith(("gemini-1.", "gemini-2."))]
+    pref.sort(key=lambda n: ("preview" in n or "exp" in n, [-int(x) if x.isdigit() else 0 for x in n.replace("-", ".").split(".")]))
     return pref[0] if pref else None
 
 
@@ -54,6 +56,7 @@ class GeminiProvider:
         model = self._resolved.get(model, model)
         tried = [model]
         last = ""
+        errors = []
         while True:
             for attempt in range(3):
                 try:
@@ -63,6 +66,8 @@ class GeminiProvider:
                 except Exception as e:
                     msg = str(e)
                     last = f"{model}: {msg[:300]}"
+                    if not errors or errors[-1][0] != model:
+                        errors.append((model, msg[:300]))
                     low = msg.lower()
                     is429 = "429" in msg or "resource_exhausted" in low
                     if is429 and ("limit: 0" in low or "free_tier" in low):
@@ -89,7 +94,8 @@ class GeminiProvider:
                         time.sleep(wait)
             alt = _pick([n for n in self._available() if n not in tried], kind)
             if not alt:
-                raise RuntimeError(f"Google refused every model tried ({', '.join(tried)}). Google's reply: {last}")
+                first = errors[0] if errors else (model, last)
+                raise RuntimeError(f"{first[0]} failed: {first[1]}  (also tried: {', '.join(tried[1:]) or 'none'})")
             print(f"[gemini] switching {model} -> {alt}")
             self._resolved[tried[0]] = alt
             tried.append(alt)
@@ -110,6 +116,18 @@ class GeminiProvider:
         flash = [n for n in names if "flash" in n and "image" not in n][:8]
         return f"Key works. {status}.\nImage models for this key: {', '.join(imgs) or 'none'}.\nVision/flash models: {', '.join(flash)}"
 
+    def _vision(self, contents, temperature=0.2):
+        """JSON-mode vision call; if Google rejects the config (400), retry once with a plain request."""
+        try:
+            return self._call(MODEL_VISION, "vision", contents=contents,
+                              config=types.GenerateContentConfig(response_mime_type="application/json",
+                                                                 temperature=temperature))
+        except Exception as e:
+            if "400" not in str(e) and "INVALID_ARGUMENT" not in str(e):
+                raise
+            print(f"[gemini] JSON-mode vision call rejected, retrying plain: {str(e)[:160]}")
+            return self._call(MODEL_VISION, "vision", contents=contents)
+
     def analyse(self, raw: bytes, context: dict) -> dict:
         prompt = (
             "You are the product analyst for a product photo studio. Look at the raw product photo and the product data. "
@@ -118,9 +136,8 @@ class GeminiProvider:
             f"Allowed mood_id: {context['moods']}\nAllowed prop ids per category: {json.dumps(context['props'])}\n"
             f"Product data: {json.dumps(context['product'])}\nSelection rules: {json.dumps(context['rules'])}"
         )
-        r = self._call(MODEL_VISION, "vision",
-            contents=[types.Part.from_bytes(data=raw, mime_type=_mime(raw)), prompt],
-            config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2))
+        contents = [types.Part.from_bytes(data=raw, mime_type=_mime(raw)), prompt + "\nReply with JSON only."]
+        r = self._vision(contents, temperature=0.2)
         return _json(r.text)
 
     def generate(self, prompt: str, raw: bytes, model: str, size: str = IMAGE_SIZE) -> bytes:
@@ -148,10 +165,9 @@ class GeminiProvider:
             "attention_70_30: product is the clear focal point. props_ok: at most 5 props, none branded, realistic scale. "
             "no_artifacts: no extra text, watermark, warped hands or geometry. margin_ok: product not cropped, clear margin."
         )
-        r = self._call(MODEL_VISION, "vision",
-            contents=[types.Part.from_bytes(data=raw, mime_type=_mime(raw)),
-                      types.Part.from_bytes(data=gen, mime_type=_mime(gen)), prompt],
-            config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0))
+        r = self._vision([types.Part.from_bytes(data=raw, mime_type=_mime(raw)),
+                          types.Part.from_bytes(data=gen, mime_type=_mime(gen)), prompt + "\nReply with JSON only."],
+                         temperature=0)
         data = _json(r.text)
         checks = {k: bool(data.get("checks", {}).get(k, False)) for k in QC_CHECKS}
         return {"checks": checks, "reasons": data.get("reasons", {})}

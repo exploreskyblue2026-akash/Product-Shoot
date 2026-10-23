@@ -80,7 +80,15 @@ def process(pid: int, only: list[int] | None = None):
         p.stage, p.error = "gen", ""
         s.commit()
         if not p.analysis:
-            analyse(s, p, prov, raw)
+            try:
+                analyse(s, p, prov, raw)
+            except Exception as e:                       # carry on with dataset defaults
+                print(f"[pipeline] analysis failed for {p.code}: {e}")
+                p.analysis = {"_error": str(e)[:300]}
+                if not p.category_id:
+                    from .dataset import library as _lib
+                    p.category_id = next(iter(_lib(s, "categories")))
+                s.commit()
         rv = live_rules(s)
         shots = {sh.no: sh for sh in p.shots}
         for no, kind in SHOT_NAMES.items():
@@ -116,17 +124,24 @@ def process(pid: int, only: list[int] | None = None):
                 sh.model = used
                 _charge(s, p, "image", used, config.image_cost(used, size), sh)
                 rel = storage.save(f"shots/{storage.safe(p.code)}/{no}-{sh.kind}-a{sh.attempts}.jpg", img)
-                result = prov.qc(raw, img, {"kind": sh.kind, "no": no}, rv.data)
-                _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
+                try:
+                    result = prov.qc(raw, img, {"kind": sh.kind, "no": no}, rv.data)
+                    _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
+                except Exception as e:                   # keep the image; a person checks it instead
+                    print(f"[pipeline] QC failed for {p.code} shot {no}: {e}")
+                    result = {"checks": {}, "reasons": {"qc": f"Automatic QC unavailable: {str(e)[:200]}"},
+                              "unchecked": True}
                 sh.image_path, sh.qc = rel, result
                 s.commit()
-                if _passed(result, qc_mode):
+                if result.get("unchecked") or _passed(result, qc_mode):
                     break
                 failed = [f"{k}: {result['reasons'].get(k, 'failed')}" for k, v in result["checks"].items()
                           if not v and (qc_mode != "light" or k in CRITICAL)]
                 prompt = spec["prompt"] + "\n\n[CORRECTION — previous attempt failed QC]\nFix: " + "; ".join(failed)
             if result is None:
                 sh.status = "wait"
+            elif result.get("unchecked"):
+                sh.status = "unchecked"
             else:
                 sh.status = "pass" if _passed(result, qc_mode) else "fail"
             sh.note = ""

@@ -150,3 +150,25 @@ def test_cost_controls():
     pipeline.tick()
     prod = c.get(f"/api/products/{pid}").json()
     assert not prod["shots"][1]["image"] and "cost limit" in prod["error"]
+
+
+def test_vision_and_qc_failure_do_not_block():
+    """If the vision model or QC is refused, the shot is still generated and sent to review."""
+    from app.providers import mock
+    oa, oq = mock.MockProvider.analyse, mock.MockProvider.qc
+    def boom(*a, **k):
+        raise RuntimeError("400 INVALID_ARGUMENT models/gemini-x is not supported")
+    mock.MockProvider.analyse, mock.MockProvider.qc = boom, boom
+    try:
+        c = client()
+        c.put("/api/admin/settings", json={"default_shots": [1], "max_cost_product": 5, "daily_budget": 100})
+        p = SAMPLES / "FUJ-MINI-EVO_front.jpg"
+        c.post("/api/sources/upload", files=[("files", ("VIS-FAIL-1_front.jpg", p.read_bytes(), "image/jpeg"))])
+        pid = next(q["id"] for q in c.get("/api/state").json()["queue"] if q["code"] == "VIS-FAIL-1")
+        c.post(f"/api/products/{pid}/run")
+        pipeline.tick()
+        prod = c.get(f"/api/products/{pid}").json()
+        assert prod["shots"][0]["image"] and prod["shots"][0]["status"] == "unchecked"
+        assert prod["stage"] == "review"
+    finally:
+        mock.MockProvider.analyse, mock.MockProvider.qc = oa, oq
