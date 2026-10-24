@@ -318,6 +318,7 @@ def run_now(pid: int, u=Depends(need("editor"))):
 
 class ApproveIn(BaseModel):
     save_now: bool = False
+    make: list[int] | None = None       # shots the button says it will make (from the screen)
 
 
 @app.post("/api/products/{pid}/approve")
@@ -332,6 +333,9 @@ def approve(pid: int, body: ApproveIn | None = None, u=Depends(need("editor"))):
             from .v2 import requested_shots
             have = {sh.no for sh in p.shots if sh.image_path}
             missing = [n for n in requested_shots(s, p) if n not in have]
+        if body.make:
+            have = {sh.no for sh in p.shots if sh.image_path}
+            missing = sorted({int(n) for n in body.make if 1 <= int(n) <= 5 and int(n) not in have})
         if missing and not body.save_now:
             # approve what exists, then make the remaining shots; the product is saved once they are done
             for sh in p.shots:

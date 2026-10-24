@@ -316,3 +316,21 @@ def test_v2_shoot_sheet_only():
     # nothing else runs: PEN20/SI has no cut-out, NOT-A-CODE is not in the master
     assert not pipeline.tick()
     c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+
+
+def test_saved_hero_only_can_make_more():
+    """A product auto-saved with only the hero can still get shots 2-5 from the approve button."""
+    c = client()
+    c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+    c.put("/api/admin/settings", json={"default_shots": [1], "max_cost_product": 5, "daily_budget": 100, "hero_gate": False})
+    p = SAMPLES / "CAM-AOC-12_front.png"
+    c.post("/api/sources/upload", files=[("files", ("MORE-TEST-1_front.png", p.read_bytes(), "image/png"))])
+    pid = next(q["id"] for q in c.get("/api/state").json()["queue"] if q["code"] == "MORE-TEST-1")
+    c.post(f"/api/products/{pid}/run"); pipeline.tick()
+    c.post(f"/api/products/{pid}/approve", json={"save_now": True})
+    assert c.get(f"/api/products/{pid}").json()["stage"] == "saved"
+    r = c.post(f"/api/products/{pid}/approve", json={"make": [2, 3, 4, 5]}).json()
+    assert r["generating"] == [2, 3, 4, 5]
+    pipeline.tick()
+    prod = c.get(f"/api/products/{pid}").json()
+    assert all(s["image"] for s in prod["shots"])
