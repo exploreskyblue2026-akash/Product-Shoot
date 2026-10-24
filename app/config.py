@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "1.3.3 (vision/QC can no longer block image generation)"
+APP_VERSION = "1.3.4 (no-credit 402 stops at once with a clear message)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

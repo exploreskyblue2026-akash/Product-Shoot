@@ -69,6 +69,9 @@ class GeminiProvider:
                     if not errors or errors[-1][0] != model:
                         errors.append((model, msg[:300]))
                     low = msg.lower()
+                    if msg.startswith("402") or " 402 " in msg or "'code': 402" in msg or "prepay" in low:
+                        raise RuntimeError("Gemini credits are used up for this API key (402). Top up in AI Studio → "
+                                           "Billing, or check the tool is using the key from the paid project.") from e
                     is429 = "429" in msg or "resource_exhausted" in low
                     if is429 and ("limit: 0" in low or "free_tier" in low):
                         # this model has no quota on this key/tier: treat like "not available", try the next model
