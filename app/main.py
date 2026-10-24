@@ -667,3 +667,138 @@ def activity(u=Depends(need("admin"))):
     with SessionLocal() as s:
         return [{"ts": a.ts.isoformat(), "who": a.who, "what": a.what}
                 for a in s.scalars(select(Activity).order_by(Activity.id.desc()).limit(200))]
+
+
+# ---------------------------------------------------------------- v2 · Product Library
+from . import library  # noqa: E402
+from .db import LibImage  # noqa: E402
+from fastapi.responses import PlainTextResponse  # noqa: E402
+
+_lib_job = {"running": False, "msg": "", "error": ""}
+
+
+@app.get("/vendor/{name}")
+def vendor(name: str):
+    p = (config.WEB_DIR / "vendor" / name).resolve()
+    if p.parent != (config.WEB_DIR / "vendor").resolve() or not p.exists():
+        raise HTTPException(404)
+    return FileResponse(p, media_type="text/javascript" if name.endswith(".mjs") else None,
+                        headers={"Cache-Control": "public, max-age=604800"})
+
+
+@app.get("/library")
+def library_page(u=Depends(need("editor"))):
+    return FileResponse(config.WEB_DIR / "library.html")
+
+
+def _bg(name: str, fn):
+    """Long jobs (Drive scans, big catalogues) run in the background so the page never times out."""
+    if _lib_job["running"]:
+        raise HTTPException(409, "Another library job is still running. Wait for it to finish.")
+    _lib_job.update(running=True, msg=name + "…", error="")
+
+    def run():
+        try:
+            with SessionLocal() as s:
+                r = fn(s)
+            _lib_job["msg"] = f"{name}: done · {r}"
+        except Exception as e:
+            _lib_job["error"] = f"{name} failed: {str(e)[:300]}"
+        finally:
+            _lib_job["running"] = False
+    threading.Thread(target=run, daemon=True).start()
+
+
+@app.get("/api/library")
+def library_state(u=Depends(need("viewer"))):
+    with SessionLocal() as s:
+        r = library.report(s)
+        r["job"] = dict(_lib_job)
+        r["drive_link"] = get_setting(s, "library_drive_link", "")
+        r["cutouts_folder"] = bool(get_setting(s, "cutouts_drive_folder", ""))
+        return r
+
+
+@app.post("/api/library/upload")
+async def library_upload(files: list[UploadFile] = File(...), u=Depends(need("editor"))):
+    payload = [(f.filename or "file", await f.read()) for f in files]
+    _bg(f"Upload of {len(payload)} file(s)", lambda s: library.add_files(s, payload))
+    return {"ok": True}
+
+
+class LinkIn(BaseModel):
+    link: str
+
+
+@app.post("/api/library/scan")
+def library_scan(body: LinkIn, u=Depends(need("editor"))):
+    _bg("Drive scan", lambda s: library.scan_drive(s, body.link))
+    return {"ok": True}
+
+
+@app.get("/api/library/pending")
+def library_pending(u=Depends(need("editor"))):
+    with SessionLocal() as s:
+        return [{"id": i.id, "key": i.key, "src": f"/files/{i.path}"} for i in library.pending(s)]
+
+
+@app.post("/api/library/images/{iid}/cutout")
+async def library_cutout(iid: int, file: UploadFile = File(...), u=Depends(need("editor"))):
+    data = await file.read()
+    with SessionLocal() as s:
+        img = s.get(LibImage, iid)
+        if not img:
+            raise HTTPException(404, "Image not found")
+        library.save_cutout(s, img, data)
+        s.commit()
+        return {"ok": True, "status": img.cut_status, "note": img.cut_note}
+
+
+class ImgAct(BaseModel):
+    action: str          # ok | redo | skip | primary
+    code: str = ""
+
+
+@app.post("/api/library/images/{iid}")
+def library_image(iid: int, body: ImgAct, u=Depends(need("editor"))):
+    with SessionLocal() as s:
+        img = s.get(LibImage, iid)
+        if not img:
+            raise HTTPException(404, "Image not found")
+        if body.action == "ok":
+            img.cut_status = "ok"
+        elif body.action == "redo":
+            img.cut_status, img.cut_path, img.cut_note = "pending", "", ""
+        elif body.action == "skip":
+            img.cut_status = "skip"
+        elif body.action == "primary":
+            library.pick_primary(s, img.key, force_id=img.id)
+        elif body.action == "assign":
+            try:
+                key = library.assign(s, iid, body.code)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            log(s, u.email, f"Library: image {iid} assigned to {key}")
+        elif body.action == "discard":
+            img.key, img.cut_status, img.primary = "", "skip", False
+            img.dup_of = img.dup_of or -1          # hidden from the tray
+        else:
+            raise HTTPException(400, "Unknown action")
+        s.commit()
+    return {"ok": True}
+
+
+@app.get("/api/library/report.csv")
+def library_csv(u=Depends(need("viewer"))):
+    with SessionLocal() as s:
+        return PlainTextResponse(library.report_csv(s), media_type="text/csv",
+                                 headers={"Content-Disposition": "attachment; filename=library-report.csv"})
+
+
+@app.post("/api/library/clear")
+def library_clear(u=Depends(need("admin"))):
+    with SessionLocal() as s:
+        library.clear(s)
+        log(s, u.email, "Library images cleared")
+        s.commit()
+    return {"ok": True}

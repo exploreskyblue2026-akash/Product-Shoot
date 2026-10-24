@@ -205,3 +205,50 @@ def test_approve_hero_then_rest_stop_and_remove():
     assert all(x["code"] != "FLOW-TEST-2" for x in c.get("/api/state").json()["queue"])
     c.post("/api/autopilot", json={"autopilot": False})
     pipeline.STOP.clear()
+
+
+def test_library_phase1():
+    """Master + shoot sheet + photos: matched by code, duplicates dropped, cut-out saved and checked, tray assign, report."""
+    import io, time
+    from PIL import Image
+    c = client()
+    LIB = Path(__file__).parent / "library"
+    def png(color, size=(900, 900), alpha=False):
+        im = Image.new("RGBA" if alpha else "RGB", size, (255, 255, 255, 0) if alpha else (255, 255, 255))
+        from PIL import ImageDraw
+        w, h = size
+        ImageDraw.Draw(im).rectangle([w * 2 // 9, h * 5 // 18, w * 7 // 9, h * 13 // 18], fill=color + ((255,) if alpha else ()))
+        b = io.BytesIO(); im.save(b, "PNG"); return b.getvalue()
+    files = [("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "application/octet-stream")),
+             ("files", ("shoot.xlsx", (LIB / "shoot.xlsx").read_bytes(), "application/octet-stream")),
+             ("files", ("TRV20-GY_1.png", png((20, 20, 20)), "image/png")),
+             ("files", ("TRV20-GY_1 copy.png", png((20, 20, 20), (600, 600)), "image/png")),   # duplicate, smaller
+             ("files", ("PEN20 SI front.png", png((150, 150, 150)), "image/png")),
+             ("files", ("IMG_0042.png", png((90, 30, 30)), "image/png"))]                    # no code -> tray
+    assert c.post("/api/library/upload", files=files).json()["ok"]
+    for _ in range(100):
+        st = c.get("/api/library").json()
+        if not st["job"]["running"]:
+            break
+        time.sleep(0.1)
+    assert not st["job"]["error"], st["job"]
+    rows = {r["code"]: r for r in st["rows"]}
+    assert st["shoot"] == 13
+    assert rows["TRV20/GY"]["images"] == 1 and rows["TRV20/GY"]["dups"] == 1
+    assert rows["TRV20/GY"]["primary"]["w"] == 900
+    assert rows["PEN20/SI"]["status"] == "cutting" and rows["PIP25/BL"]["status"] == "needs_photo"
+    assert len(st["unmatched"]) == 1
+    pend = c.get("/api/library/pending").json()
+    assert {p["key"] for p in pend} == {"TRV20GY", "PEN20SI"}
+    gid = next(p["id"] for p in pend if p["key"] == "TRV20GY")
+    r = c.post(f"/api/library/images/{gid}/cutout", files={"file": ("x.png", png((20, 20, 20), alpha=True), "image/png")}).json()
+    assert r["status"] == "ok", r
+    assert c.get("/api/library").json()["counts"]["ready"] == 1
+    # tray: assign the unknown photo to PIP25/BL
+    uid = st["unmatched"][0]["id"]
+    assert c.post(f"/api/library/images/{uid}", json={"action": "assign", "code": "pip25-bl"}).json()["ok"]
+    rows = {r["code"]: r for r in c.get("/api/library").json()["rows"]}
+    assert rows["PIP25/BL"]["status"] == "cutting"
+    csv = c.get("/api/library/report.csv").text
+    assert "TRV20/GY" in csv and "ready" in csv
+    assert c.get("/library").status_code == 200

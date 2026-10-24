@@ -140,6 +140,40 @@ class Activity(Base):
     what: Mapped[str] = mapped_column(Text)
 
 
+
+class LibProduct(Base):
+    """One product from the master sheet. key = code with only letters+digits, upper case (BCO64/GY -> BCO64GY)."""
+    __tablename__ = "lib_products"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(80), index=True)
+    product_id: Mapped[str] = mapped_column(String(80), default="")
+    item_code: Mapped[str] = mapped_column(String(40), default="", index=True)
+    ean: Mapped[str] = mapped_column(String(40), default="", index=True)
+    name: Mapped[str] = mapped_column(String(300), default="")
+    brand: Mapped[str] = mapped_column(String(80), default="")
+    category: Mapped[str] = mapped_column(String(80), default="")
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class LibImage(Base):
+    """A raw image found for a product (photo, catalogue picture, Drive file) and its cut-out."""
+    __tablename__ = "lib_images"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(80), default="", index=True)      # "" = unmatched
+    source: Mapped[str] = mapped_column(String(20), default="file")          # file | catalogue | drive
+    src_name: Mapped[str] = mapped_column(String(300), default="")
+    drive_id: Mapped[str] = mapped_column(String(100), default="")
+    path: Mapped[str] = mapped_column(String(500), default="")
+    w: Mapped[int] = mapped_column(Integer, default=0)
+    h: Mapped[int] = mapped_column(Integer, default=0)
+    phash: Mapped[str] = mapped_column(String(32), default="")
+    dup_of: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    cut_path: Mapped[str] = mapped_column(String(500), default="")
+    cut_status: Mapped[str] = mapped_column(String(20), default="pending")   # pending | ok | check | skip
+    cut_note: Mapped[str] = mapped_column(String(300), default="")
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
 def init_db():
     Base.metadata.create_all(engine)
 
