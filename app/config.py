@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "1.3.4 (no-credit 402 stops at once with a clear message)"
+APP_VERSION = "1.4.0 (Stop button, approve hero then make remaining shots, remove from queue)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

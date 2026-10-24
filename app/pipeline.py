@@ -14,6 +14,7 @@ from .providers import get_provider
 
 SHOT_NAMES = {1: "hero", 2: "use_case", 3: "detail", 4: "arrangement", 5: "lifestyle"}
 _lock = threading.Lock()
+STOP = threading.Event()          # set by the Stop button: finish nothing new, stop between attempts
 
 
 def month_spend(s: Session) -> float:
@@ -114,6 +115,9 @@ def process(pid: int, only: list[int] | None = None):
             prompt = spec["prompt"]
             result = None
             for attempt in range(retries + 1):
+                if STOP.is_set():
+                    stop_reason = "Stopped by you"
+                    break
                 est = config.image_cost(model, size) + config.COST_VISION
                 if p.cost + est > cap:
                     stop_reason = f"Stopped at the ${cap:.2f} per-product cost limit"
@@ -147,6 +151,9 @@ def process(pid: int, only: list[int] | None = None):
             sh.note = ""
             s.commit()
             if stop_reason:
+                break
+            if STOP.is_set():
+                stop_reason = "Stopped by you"
                 break
             if hero_gate and no == 1 and sh.status == "fail" and not only:
                 stop_reason = "Hero failed QC, other shots not generated (saves credits)"
@@ -209,6 +216,8 @@ def rescan_watched(s: Session):
 
 
 def next_job(s: Session) -> int | None:
+    if STOP.is_set():
+        return None
     """Manual 'run now' jobs first; otherwise the oldest queued product while autopilot is on."""
     for p in s.scalars(select(Product).where(Product.stage.in_(["queue", "gen"])).order_by(Product.id)):
         if (p.data or {}).get("run_now"):

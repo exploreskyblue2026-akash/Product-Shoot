@@ -128,6 +128,7 @@ body{margin:0}[hidden]{display:none!important}
         <label><input type="checkbox" id="o-approve" checked>Auto-approve when QC passes</label>
         <label><input type="checkbox" id="o-retry">Retry failed shots once (costs extra)</label>
         <label><input type="checkbox" id="o-shopify">Also publish to Shopify (draft)</label>
+        <button class="btn danger" type="button" id="stop-all" style="width:100%;margin-top:10px">■ Stop all generation</button>
       </div>
     </section>
 
@@ -248,12 +249,13 @@ function renderStage(){
   const c=(s.qc&&s.qc.checks)||null,why=(s.qc&&s.qc.reasons)||{};
   $("#qc").innerHTML=(s.qc&&s.qc.unchecked)?`<li class="hint">${esc(s.qc.reasons.qc)}</li>`:c&&Object.keys(c).length?Object.entries(c).map(([k,ok])=>`<li title="${esc(why[k]||"")}"><span class="${ok?"y":"n"}" aria-hidden="true">${ok?"✓":"✕"}</span>${QCL[k]||k}${ok?"":`<span class="hint">&nbsp;${esc(why[k]||"")}</span>`}<span class="sr">${ok?" passed":" failed"}</span></li>`).join(""):'<li class="hint">Checks run when the shot is generated.</li>';
   $("#qc-score").textContent=c?Object.values(c).filter(Boolean).length+"/"+Object.keys(c).length+(s.attempts>1?" · "+s.attempts+" tries":""):"";
-  const has=P.shots.some(x=>x.image),idle=P.stage!="gen";
-  $("#actions").innerHTML=`${P.stage=="queue"||P.stage=="error"?`<button class="btn primary" type="button" data-act="run">Generate now</button>`:""}<button class="btn ${P.stage=="queue"||P.stage=="error"?"":"primary"}" type="button" data-act="approve" ${P.stage=="review"&&has?"":"disabled"}>Approve all &amp; save</button><button class="btn" type="button" data-act="regen" ${idle&&(has||P.stage!="queue")?"":"disabled"}>${P.shots[sel].image?"Regenerate":"Generate"} shot ${sel+1}</button><button class="btn" type="button" data-act="skip">Next product</button><button class="btn danger" type="button" data-act="reject" ${idle?"":"disabled"}>Reject product</button>`}
+  const has=P.shots.some(x=>x.image),idle=P.stage!="gen",miss=P.shots.filter(x=>!x.image).map(x=>x.no).join(", ");
+  $("#actions").innerHTML=`${P.stage=="queue"||P.stage=="error"?`<button class="btn primary" type="button" data-act="run">Generate now</button>`:""}<button class="btn ${P.stage=="queue"||P.stage=="error"?"":"primary"}" type="button" data-act="approve" ${P.stage=="review"&&has?"":"disabled"}>${miss?"Approve &amp; make shots "+miss:"Approve all &amp; save"}</button><button class="btn" type="button" data-act="regen" ${idle&&(has||P.stage!="queue")?"":"disabled"}>${P.shots[sel].image?"Regenerate":"Generate"} shot ${sel+1}</button><button class="btn" type="button" data-act="skip">Next product</button><button class="btn danger" type="button" data-act="reject" ${idle?"":"disabled"}>Reject product</button>${P.stage!="saved"?`<button class="btn" type="button" data-act="remove" ${idle?"":"disabled"} title="${idle?"":"Press Stop first"}">Remove from queue</button>`:""}`}
 
 async function act(kind){if(busy||!P)return;busy=true;try{
   if(kind=="run"){await api(`/api/products/${P.id}/run`,{method:"POST"});toast("Started "+P.code)}
-  if(kind=="approve"){await api(`/api/products/${P.id}/approve`,{method:"POST"});toast(P.code+" approved and saved")}
+  if(kind=="approve"){const r=await api(`/api/products/${P.id}/approve`,{method:"POST",body:{}});toast(r.generating?P.code+": approved, now making shots "+r.generating.join(", "):P.code+" approved and saved")}
+  if(kind=="remove"){await api(`/api/products/${P.id}`,{method:"DELETE"});toast(P.code+" removed from the queue");cur=null}
   if(kind=="regen"){await api(`/api/products/${P.id}/regenerate`,{method:"POST",body:{shot:sel+1,note:$("#note").value}});toast("Regenerating shot "+(sel+1)+($("#note").value?" with your note":""));$("#note").value=""}
   if(kind=="reject"){await api(`/api/products/${P.id}/reject`,{method:"POST"});toast(P.code+" rejected");cur=null}
   if(kind=="skip"){const list=S.queue.filter(q=>q.id!==cur);cur=list.length?list[0].id:null;sel=0}
@@ -265,6 +267,7 @@ document.addEventListener("click",e=>{
   const a=e.target.closest("[data-act]");if(a&&!a.disabled)act(a.dataset.act)});
 async function setAuto(body){try{await api("/api/autopilot",{method:"POST",body});await refresh()}catch(e){toast(e.message)}}
 $("#ap").addEventListener("click",()=>{const on=$("#ap").getAttribute("aria-checked")!=="true";setAuto({autopilot:on});toast(on?"Autopilot on":"Autopilot off")});
+$("#stop-all").addEventListener("click",async()=>{try{await api("/api/stop",{method:"POST"});toast("Stopping: the current image finishes, nothing new starts");await refresh()}catch(e){toast(e.message)}});
 $("#o-approve").addEventListener("change",e=>setAuto({auto_approve:e.target.checked}));
 $("#o-shopify").addEventListener("change",e=>setAuto({publish_shopify:e.target.checked}));
 $("#o-retry").addEventListener("change",e=>setAuto({retries:e.target.checked?1:0}));

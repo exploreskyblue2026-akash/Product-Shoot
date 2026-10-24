@@ -172,3 +172,36 @@ def test_vision_and_qc_failure_do_not_block():
         assert prod["stage"] == "review"
     finally:
         mock.MockProvider.analyse, mock.MockProvider.qc = oa, oq
+
+
+def test_approve_hero_then_rest_stop_and_remove():
+    """Approving a hero-only product makes the other shots; Stop halts work; Remove deletes from the queue."""
+    c = client()
+    c.put("/api/admin/settings", json={"default_shots": [1], "max_cost_product": 5, "daily_budget": 100,
+                                       "hero_gate": True, "qc_mode": "light"})
+    c.post("/api/autopilot", json={"autopilot": False})
+    p = SAMPLES / "WAT-HEM-SSGT_front.png"
+    c.post("/api/sources/upload", files=[("files", ("FLOW-TEST-1_front.jpg", p.read_bytes(), "image/jpeg")),
+                                         ("files", ("FLOW-TEST-2_front.jpg", p.read_bytes(), "image/jpeg"))])
+    q = {x["code"]: x["id"] for x in c.get("/api/state").json()["queue"]}
+    pid = q["FLOW-TEST-1"]
+    c.post(f"/api/products/{pid}/run"); pipeline.tick()
+    assert c.get(f"/api/products/{pid}").json()["stage"] == "review"
+    r = c.post(f"/api/products/{pid}/approve", json={}).json()
+    assert r["generating"] == [2, 3, 4, 5]
+    pipeline.tick()
+    prod = c.get(f"/api/products/{pid}").json()
+    assert all(s["image"] for s in prod["shots"]) and prod["stage"] == "review"
+    assert c.post(f"/api/products/{pid}/approve", json={}).json() == {"ok": True}
+    assert c.get(f"/api/products/{pid}").json()["stage"] == "saved"
+    # stop: queued run is cancelled and nothing runs
+    pid2 = q["FLOW-TEST-2"]
+    c.post(f"/api/products/{pid2}/run")
+    c.post("/api/stop")
+    assert not pipeline.tick()
+    assert c.get("/api/state").json()["autopilot"]["autopilot"] is False
+    # remove from queue
+    assert c.delete(f"/api/products/{pid2}").json()["ok"]
+    assert all(x["code"] != "FLOW-TEST-2" for x in c.get("/api/state").json()["queue"])
+    c.post("/api/autopilot", json={"autopilot": False})
+    pipeline.STOP.clear()

@@ -265,6 +265,8 @@ def autopilot(body: AutoIn, u=Depends(need("editor"))):
     with SessionLocal() as s:
         for k, v in body.model_dump(exclude_none=True).items():
             set_setting(s, k, v)
+        if body.autopilot:
+            pipeline.STOP.clear()
         if body.autopilot is not None:
             log(s, u.email, "Autopilot " + ("on" if body.autopilot else "off"))
         s.commit()
@@ -286,16 +288,60 @@ def run_now(pid: int, u=Depends(need("editor"))):
             raise HTTPException(400, "This product has no raw photo yet")
         p.data, p.stage, p.error = {**(p.data or {}), "run_now": True}, "queue", ""
         s.commit()
+    pipeline.STOP.clear()
     return {"ok": True}
 
 
+class ApproveIn(BaseModel):
+    save_now: bool = False
+
+
 @app.post("/api/products/{pid}/approve")
-def approve(pid: int, u=Depends(need("editor"))):
+def approve(pid: int, body: ApproveIn | None = None, u=Depends(need("editor"))):
+    body = body or ApproveIn()
     with SessionLocal() as s:
         p = _get(s, pid)
         if not any(sh.image_path for sh in p.shots):
             raise HTTPException(400, "Nothing generated yet")
+        missing = [sh.no for sh in p.shots if not sh.image_path]
+        if missing and not body.save_now:
+            # approve what exists, then make the remaining shots; the product is saved once they are done
+            for sh in p.shots:
+                if sh.image_path:
+                    sh.status = "approved"
+            p.data = {**(p.data or {}), "run_now": True, "only_shots": missing}
+            p.stage, p.error = "queue", ""
+            log(s, u.email, f"Approved {p.code} so far, generating shots {missing}")
+            s.commit()
+            pipeline.STOP.clear()
+            return {"ok": True, "generating": missing}
         pipeline.approve(s, p, u.email)
+    return {"ok": True}
+
+
+@app.post("/api/stop")
+def stop(u=Depends(need("editor"))):
+    """Stop button: autopilot off, cancel waiting jobs, current product stops before its next image."""
+    pipeline.STOP.set()
+    with SessionLocal() as s:
+        set_setting(s, "autopilot", False)
+        for p in s.scalars(select(Product).where(Product.stage.in_(["queue", "gen"]))):
+            if (p.data or {}).get("run_now"):
+                p.data = {k: v for k, v in p.data.items() if k not in ("run_now", "only_shots")}
+        log(s, u.email, "Stopped all generation")
+        s.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/products/{pid}")
+def remove(pid: int, u=Depends(need("editor"))):
+    with SessionLocal() as s:
+        p = _get(s, pid)
+        if p.stage == "gen":
+            raise HTTPException(400, "This product is generating. Press Stop first, then remove it.")
+        log(s, u.email, f"Removed {p.code} from the queue")
+        s.delete(p)
+        s.commit()
     return {"ok": True}
 
 
@@ -315,6 +361,7 @@ def regenerate(pid: int, body: RegenIn, u=Depends(need("editor"))):
         p.stage = "queue"
         log(s, u.email, f"Regenerate {p.code} shot {body.shot}" + (f": {body.note[:80]}" if body.note else ""))
         s.commit()
+    pipeline.STOP.clear()
     return {"ok": True}
 
 
