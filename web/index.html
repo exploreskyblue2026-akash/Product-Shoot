@@ -22,6 +22,10 @@
 .sec{display:flex;flex-direction:column;gap:10px}
 .sec-h{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .sec-h h2{font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.mode{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}
+.mode button{text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:8px 10px;cursor:pointer;min-width:0}
+.mode button[aria-checked="true"]{border-color:var(--azure);box-shadow:inset 0 0 0 1px var(--azure);background:var(--celeste-soft)}
+.mode b{display:block;font-size:13px}.mode small{display:block;font-size:11px;color:var(--muted);line-height:1.25}
 .step-n{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:3px;background:var(--azure);color:var(--on-azure);font-size:11px;font-weight:800;margin-right:8px;vertical-align:1px}
 
 /* autopilot canvas block */
@@ -116,6 +120,10 @@ body{margin:0}[hidden]{display:none!important}
       <span class="mono hint" id="spend">$0.00 today</span>
     </div>
 
+    <div class="mode" role="radiogroup" aria-label="Pipeline">
+      <button type="button" role="radio" data-mode="v1" aria-checked="true"><b>v1 · AI full shot</b><small>AI redraws product + scene</small></button>
+      <button type="button" role="radio" data-mode="v2" aria-checked="false"><b>v2 · Cut-out + scene</b><small>Real product, only shoot-sheet codes</small></button>
+    </div>
     <section class="auto" aria-labelledby="ap-h">
       <h2 id="ap-h">Autopilot</h2>
       <button class="switch" id="ap" role="switch" aria-checked="false"><span class="track"><span class="knob"></span></span><span id="ap-label">Off · start the queue</span></button>
@@ -132,7 +140,14 @@ body{margin:0}[hidden]{display:none!important}
       </div>
     </section>
 
-    <section class="sec" aria-labelledby="in-h">
+    <section class="sec" id="v2-box" aria-labelledby="v2-h" hidden>
+      <div class="sec-h"><h2 id="v2-h"><span class="step-n">1</span>Shoot sheet</h2><a class="btn sm" href="/library">Open Library</a></div>
+      <p class="hint" style="margin:0" id="v2-sum">—</p>
+      <button class="btn primary" type="button" id="v2-load" style="width:100%">Load shoot sheet into queue</button>
+      <p class="hint" style="margin:0">Only the codes in the shoot sheet are queued, with only the shots it asks for. Drive folders are not watched in v2.</p>
+    </section>
+
+    <section class="sec v1only" aria-labelledby="in-h">
       <div class="sec-h"><h2 id="in-h"><span class="step-n">1</span>Add input</h2></div>
       <div class="types" role="radiogroup" aria-label="Input type">
         <button class="type" role="radio" aria-checked="true" data-type="drive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 3h8l6 11-4 7H6l-4-7z"/><path d="M8 3l6 11H2M16 3l-6 11"/></svg>Drive</button>
@@ -158,7 +173,7 @@ body{margin:0}[hidden]{display:none!important}
       </form>
     </section>
 
-    <section class="sec" aria-labelledby="repo-h">
+    <section class="sec v1only" aria-labelledby="repo-h">
       <div class="sec-h"><h2 id="repo-h">Input repositories</h2><span class="chip info" id="repo-n">0</span></div>
       <div class="list" id="repos"></div>
     </section>
@@ -209,7 +224,7 @@ body{margin:0}[hidden]{display:none!important}
 <script>
 (function(){
 const SHOTS=["Hero","Use case","Detail","Arrangement","Lifestyle"];
-const QCL={shape_match:"Shape match",colour_match:"Colour match",label_text:"Label text",soft_light:"Soft light only",attention_70_30:"70 / 30 focus",props_ok:"Props ≤ 5, odd",no_artifacts:"No artefacts",margin_ok:"Margin ≥ 8%"};
+const QCL={product_exact:"Real product (not redrawn)",shape_match:"Shape match",colour_match:"Colour match",label_text:"Label text",soft_light:"Soft light only",attention_70_30:"70 / 30 focus",props_ok:"Props ≤ 5, odd",no_artifacts:"No artefacts",margin_ok:"Margin ≥ 8%"};
 const TYPE={drive:["Drive folder link","https://drive.google.com/drive/folders/…",0],catalogue:["Catalogue PDF link (or drop the PDF)","https://brand.com/catalogue.pdf",1],files:["","",0],sheet:["Sheet link","https://docs.google.com/spreadsheets/d/…",2],shopify:["Store (leave blank to use the connected store)","",3],url:["Product page link","https://…",1]};
 const IC={drive:'<path d="M8 3h8l6 11-4 7H6l-4-7z"/>',catalogue:'<path d="M4 4h10a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4z"/>',files:'<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',sheet:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/>',shopify:'<path d="M5 8h14l-1 12H6z"/><path d="M9 8a3 3 0 0 1 6 0"/>',url:'<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/>'};
 const $=s=>document.querySelector(s);
@@ -224,13 +239,16 @@ async function refresh(){try{S=await api("/api/state");if(!cur){const f=S.queue.
   if(cur){P=await api("/api/products/"+cur).catch(()=>null);if(!P)cur=null}renderLeft();renderStage()}catch(e){if(e.message!=="signin")console.warn(e)}}
 
 function renderLeft(){
+  const v2=S.pipeline_mode=="v2";document.querySelectorAll(".mode [data-mode]").forEach(b=>b.setAttribute("aria-checked",b.dataset.mode==S.pipeline_mode));
+  $("#v2-box").hidden=!v2;document.querySelectorAll(".v1only").forEach(x=>x.hidden=v2);
+  if(v2&&S.v2){const m=S.v2;$("#v2-sum").textContent=m.shoot?`${m.shoot} codes in the shoot sheet · ${m.in_master} found in master · ${m.ready} with a ready cut-out · ${m.scenes} scenes in the pool (${m.strategy})`:"No shoot sheet yet. Add it on the Library page."}
   const a=S.autopilot;$("#ap").setAttribute("aria-checked",!!a.autopilot);$("#ap-label").textContent=a.autopilot?"On · working through the queue":"Off · start the queue";
   $("#o-approve").checked=!!a.auto_approve;$("#o-shopify").checked=!!a.publish_shopify;$("#o-retry").checked=(a.retries||0)>0;
   $("#s-queue").textContent=S.queue.filter(q=>q.stage=="queue"||q.stage=="gen").length;$("#s-saved").textContent=S.saved.length;$("#s-rev").textContent=S.queue.filter(q=>q.stage=="review"||q.stage=="error").length;
   $("#spend").textContent="₹"+Math.round(S.spend_today*(S.usd_inr||88))+" / ₹"+Math.round(S.daily_budget*(S.usd_inr||88))+" today";
   $("#repo-n").textContent=S.sources.length;
   $("#repos").innerHTML=S.sources.map(r=>`<div class="li"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${IC[r.type]||IC.url}</svg></span><span style="min-width:0"><b>${esc(r.name)}</b><small title="${esc(r.error||r.detail)}">${esc(r.status=="error"?"Error: "+r.error:r.status=="new"?"Scanning…":r.detail)}</small></span><span class="chip ${r.status=="error"?"bad":r.watch?"info":"mute"}">${r.count}${r.watch?" · watching":""}</span></div>`).join("")||'<div class="empty">No inputs yet</div>';
-  const chip=q=>({gen:`<span class="chip info">${q.done}/5</span>`,review:'<span class="chip warn">Review</span>',error:'<span class="chip bad">Error</span>',needs_photo:'<span class="chip mute">No photo</span>'})[q.stage]||'<span class="chip mute">Waiting</span>';
+  const chip=q=>q.paused?'<span class="chip mute">Paused</span>':({gen:`<span class="chip info">${q.done}/${q.v2&&q.shots_wanted.length?q.shots_wanted.length:5}</span>`,review:'<span class="chip warn">Review</span>',error:'<span class="chip bad">Error</span>',needs_photo:'<span class="chip mute">No photo</span>'})[q.stage]||'<span class="chip mute">Waiting</span>';
   $("#queue").innerHTML=S.queue.map(q=>li(q,chip(q))).join("")||'<div class="empty">Queue is empty. Add an input above.</div>';
   $("#saved").innerHTML=S.saved.map(q=>li(q,'<span class="chip ok">Saved</span>')).join("")||'<div class="empty">Approved shots are saved here</div>';
   $("#admin-link").hidden=!(S.user.role=="admin"||S.user.role=="owner")}
@@ -244,18 +262,20 @@ function renderStage(){
   const st={queue:["Waiting in queue","mute"],needs_photo:["Waiting for a photo","mute"],gen:["Generating "+P.done+"/5","info"],review:["Needs your approval","warn"],saved:["Approved · saved","ok"],error:["Stopped: "+(P.error||"error").slice(0,80),"bad"]}[P.stage]||["—","mute"];
   $("#p-state").className="chip "+st[1];$("#p-state").textContent=st[0];
   const g=$("#gallery");const html=P.shots.map((s,i)=>{const ready=!!s.image;const flag=s.status=="pass"?["ok","QC pass"]:s.status=="fail"?["bad","QC fail"]:s.status=="approved"?["info","Approved"]:s.status=="unchecked"?["warn","Check by eye"]:null;
-    return `<button type="button" class="shot p${i}${s.status=="gen"?" gen":""}" data-shot="${i}" aria-pressed="${i===sel}" aria-label="Shot ${i+1} ${SHOTS[i]}">${ready?`<img src="${esc(s.image)}" alt="${SHOTS[i]} shot of ${esc(P.name)}" loading="lazy">`:`<span class="ph"><b>${SHOTS[i]}</b><span>${s.status=="gen"?"Generating…":"Not generated yet"}</span></span>`}<span class="cap"><span>${i+1} · ${SHOTS[i]}</span>${i==0?"<span>4:5 · 2000×2500</span>":""}</span>${flag?`<span class="flag chip ${flag[0]}">${flag[1]}</span>`:""}</button>`}).join("");
+    return `<button type="button" class="shot p${i}${s.status=="gen"?" gen":""}" data-shot="${i}" aria-pressed="${i===sel}" aria-label="Shot ${i+1} ${SHOTS[i]}">${ready?`<img src="${esc(s.image)}" alt="${SHOTS[i]} shot of ${esc(P.name)}" loading="lazy">`:`<span class="ph"><b>${SHOTS[i]}</b><span>${s.status=="gen"?"Generating…":P.v2&&P.shots_wanted.length&&!P.shots_wanted.includes(i+1)?"Not requested in shoot sheet":"Not generated yet"}</span></span>`}<span class="cap"><span>${i+1} · ${SHOTS[i]}</span>${i==0?"<span>4:5 · 2000×2500</span>":""}</span>${flag?`<span class="flag chip ${flag[0]}">${flag[1]}</span>`:""}</button>`}).join("");
   if(g.dataset.sig!==html){g.innerHTML=html;g.dataset.sig=html}
   const s=P.shots[sel];$("#qc-shot").textContent=(sel+1)+" "+SHOTS[sel];
   const c=(s.qc&&s.qc.checks)||null,why=(s.qc&&s.qc.reasons)||{};
   $("#qc").innerHTML=(s.qc&&s.qc.unchecked)?`<li class="hint">${esc(s.qc.reasons.qc)}</li>`:c&&Object.keys(c).length?Object.entries(c).map(([k,ok])=>`<li title="${esc(why[k]||"")}"><span class="${ok?"y":"n"}" aria-hidden="true">${ok?"✓":"✕"}</span>${QCL[k]||k}${ok?"":`<span class="hint">&nbsp;${esc(why[k]||"")}</span>`}<span class="sr">${ok?" passed":" failed"}</span></li>`).join(""):'<li class="hint">Checks run when the shot is generated.</li>';
   $("#qc-score").textContent=c?Object.values(c).filter(Boolean).length+"/"+Object.keys(c).length+(s.attempts>1?" · "+s.attempts+" tries":""):"";
   const has=P.shots.some(x=>x.image),idle=P.stage!="gen",miss=P.shots.filter(x=>!x.image).map(x=>x.no).join(", ");
-  $("#actions").innerHTML=`${P.stage=="queue"||P.stage=="error"?`<button class="btn primary" type="button" data-act="run">Generate now</button>`:""}<button class="btn ${P.stage=="queue"||P.stage=="error"?"":"primary"}" type="button" data-act="approve" ${P.stage=="review"&&has?"":"disabled"}>${miss?"Approve &amp; make shots "+miss:"Approve all &amp; save"}</button><button class="btn" type="button" data-act="regen" ${idle&&(has||P.stage!="queue")?"":"disabled"}>${P.shots[sel].image?"Regenerate":"Generate"} shot ${sel+1}</button><button class="btn" type="button" data-act="skip">Next product</button><button class="btn danger" type="button" data-act="reject" ${idle?"":"disabled"}>Reject product</button>${P.stage!="saved"?`<button class="btn" type="button" data-act="remove" ${idle?"":"disabled"} title="${idle?"":"Press Stop first"}">Remove from queue</button>`:""}`}
+  $("#actions").innerHTML=`${P.stage=="queue"||P.stage=="error"?`<button class="btn primary" type="button" data-act="run">Generate now</button>`:""}<button class="btn ${P.stage=="queue"||P.stage=="error"?"":"primary"}" type="button" data-act="approve" ${P.stage=="review"&&has?"":"disabled"}>${miss?"Approve &amp; make shots "+miss:"Approve all &amp; save"}</button><button class="btn" type="button" data-act="regen" ${idle&&(has||P.stage!="queue")?"":"disabled"}>${P.shots[sel].image?"Regenerate":"Generate"} shot ${sel+1}</button><button class="btn" type="button" data-act="skip">Next product</button><button class="btn danger" type="button" data-act="reject" ${idle?"":"disabled"}>Reject product</button>${P.stage!="saved"?`<button class="btn" type="button" data-act="up" title="Move up in the queue">↑</button><button class="btn" type="button" data-act="down" title="Move down in the queue">↓</button><button class="btn" type="button" data-act="top">To top</button><button class="btn" type="button" data-act="pause">${P.paused?"Resume":"Pause"}</button>`:""}${P.stage!="saved"?`<button class="btn" type="button" data-act="remove" ${idle?"":"disabled"} title="${idle?"":"Press Stop first"}">Remove from queue</button>`:""}`}
 
 async function act(kind){if(busy||!P)return;busy=true;try{
   if(kind=="run"){await api(`/api/products/${P.id}/run`,{method:"POST"});toast("Started "+P.code)}
   if(kind=="approve"){const r=await api(`/api/products/${P.id}/approve`,{method:"POST",body:{}});toast(r.generating?P.code+": approved, now making shots "+r.generating.join(", "):P.code+" approved and saved")}
+  if(["up","down","top"].includes(kind)){await api(`/api/products/${P.id}/move`,{method:"POST",body:{to:kind}})}
+  if(kind=="pause"){await api(`/api/products/${P.id}/pause`,{method:"POST",body:{paused:!P.paused}});toast(P.code+(P.paused?" resumed":" paused"))}
   if(kind=="remove"){await api(`/api/products/${P.id}`,{method:"DELETE"});toast(P.code+" removed from the queue");cur=null}
   if(kind=="regen"){await api(`/api/products/${P.id}/regenerate`,{method:"POST",body:{shot:sel+1,note:$("#note").value}});toast("Regenerating shot "+(sel+1)+($("#note").value?" with your note":""));$("#note").value=""}
   if(kind=="reject"){await api(`/api/products/${P.id}/reject`,{method:"POST"});toast(P.code+" rejected");cur=null}
@@ -268,6 +288,9 @@ document.addEventListener("click",e=>{
   const a=e.target.closest("[data-act]");if(a&&!a.disabled)act(a.dataset.act)});
 async function setAuto(body){try{await api("/api/autopilot",{method:"POST",body});await refresh()}catch(e){toast(e.message)}}
 $("#ap").addEventListener("click",()=>{const on=$("#ap").getAttribute("aria-checked")!=="true";setAuto({autopilot:on});toast(on?"Autopilot on":"Autopilot off")});
+document.querySelectorAll(".mode [data-mode]").forEach(b=>b.addEventListener("click",async()=>{if(b.getAttribute("aria-checked")=="true")return;
+  try{await api("/api/autopilot",{method:"POST",body:{pipeline_mode:b.dataset.mode}});cur=null;P=null;toast(b.dataset.mode=="v2"?"v2 on: only shoot-sheet codes, real product + scene":"v1 on: AI generates the full shot");await refresh()}catch(e){toast(e.message)}}));
+$("#v2-load").addEventListener("click",async()=>{try{const r=await api("/api/v2/load-shoot",{method:"POST"});toast(`${r.total} codes: ${r.total-r.waiting-r.missing} ready to generate, ${r.waiting} waiting for photo/cut-out, ${r.missing} not in master`);await refresh()}catch(e){toast(e.message)}});
 $("#stop-all").addEventListener("click",async()=>{try{await api("/api/stop",{method:"POST"});toast("Stopping: the current image finishes, nothing new starts");await refresh()}catch(e){toast(e.message)}});
 $("#o-approve").addEventListener("change",e=>setAuto({auto_approve:e.target.checked}));
 $("#o-shopify").addEventListener("change",e=>setAuto({publish_shopify:e.target.checked}));

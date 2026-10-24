@@ -37,3 +37,20 @@ class MockProvider:
             checks["label_text"] = False
             return {"checks": checks, "reasons": {"label_text": "Mock: brand text looks altered"}}
         return {"checks": checks, "reasons": {}}
+
+
+def _scene(self, prompt: str, model: str, size: str = "1K") -> bytes:
+    kind = next((k for k in SETS if f"shot: {k}" in prompt), "hero")
+    bg = Image.new("RGB", (1600, 2000), SETS[kind])
+    d = ImageDraw.Draw(bg)
+    for y in range(1300, 2000, 6):                      # a "surface" so composites have something to sit on
+        c = tuple(max(0, v - (y - 1300) // 30) for v in SETS[kind])
+        d.line([(0, y), (1600, y)], fill=c, width=6)
+    d.ellipse([60, 1500, 300, 1640], fill=(200, 190, 170))   # a prop at the edge
+    d.text((60, 60), f"MOCK SCENE · {kind}", fill=(0, 110, 255))
+    out = io.BytesIO()
+    bg.save(out, "JPEG", quality=88)
+    return out.getvalue()
+
+
+MockProvider.generate_scene = _scene

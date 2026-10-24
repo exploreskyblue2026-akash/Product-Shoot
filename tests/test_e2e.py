@@ -252,3 +252,67 @@ def test_library_phase1():
     csv = c.get("/api/library/report.csv").text
     assert "TRV20/GY" in csv and "ready" in csv
     assert c.get("/library").status_code == 200
+
+
+def test_v2_shoot_sheet_only():
+    """v2: only shoot-sheet codes are queued; only requested shots are made; pool scenes reused; queue editable."""
+    import io, time, openpyxl
+    from PIL import Image, ImageDraw
+    c = client()
+    LIB = Path(__file__).parent / "library"
+    def photo(color):
+        im = Image.new("RGB", (1000, 1000), (255, 255, 255))
+        ImageDraw.Draw(im).rectangle([250, 300, 750, 700], fill=color)
+        b = io.BytesIO(); im.save(b, "PNG"); return b.getvalue()
+    def cut(color):
+        im = Image.new("RGBA", (1000, 1000), (0, 0, 0, 0))
+        ImageDraw.Draw(im).rectangle([250, 300, 750, 700], fill=color + (255,))
+        b = io.BytesIO(); im.save(b, "PNG"); return b.getvalue()
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["SHOOT", "SHOTS", "PRIORITY", "NOTE"])
+    ws.append(["TRV20/GY", "1,3", 2, ""]); ws.append(["TRV20/BK", "1,3", 1, "black first"]); ws.append(["PEN20/SI", "", 3, ""])
+    ws.append(["NOT-A-CODE", "", 4, ""])
+    b = io.BytesIO(); wb.save(b)
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "x/y")),
+                                         ("files", ("v2shoot.xlsx", b.getvalue(), "x/y")),
+                                         ("files", ("TRV20-GY.png", photo((90, 90, 100)), "image/png")),
+                                         ("files", ("TRV20-BK.png", photo((10, 10, 10)), "image/png"))])
+    for _ in range(100):
+        if not c.get("/api/library").json()["job"]["running"]:
+            break
+        time.sleep(0.1)
+    for p in c.get("/api/library/pending").json():
+        if p["key"] in ("TRV20GY", "TRV20BK"):
+            c.post(f"/api/library/images/{p['id']}/cutout", files={"file": ("c.png", cut((50, 50, 50)), "image/png")})
+    c.put("/api/admin/settings", json={"scene_strategy": "auto", "max_cost_product": 5, "daily_budget": 100,
+                                       "default_shots": [1, 2, 3, 4, 5]})
+    c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": False})
+    r = c.post("/api/v2/load-shoot").json()
+    assert r["total"] == 4 and r["missing"] == 1 and r["waiting"] == 1, r
+    st = c.get("/api/state").json()
+    assert st["pipeline_mode"] == "v2"
+    codes = [q["code"] for q in st["queue"]]
+    assert codes[:2] == ["TRV20/BK", "TRV20/GY"] and len(codes) == 4, codes        # sheet priority order, nothing else
+    assert not any(q["code"].startswith(("WAT", "CAM", "FLOW", "COST")) for q in st["queue"])  # v1 items hidden
+    # editable queue: move GY to top, then pause it
+    gy = next(q["id"] for q in st["queue"] if q["code"] == "TRV20/GY")
+    c.post(f"/api/products/{gy}/move", json={"to": "top"})
+    assert c.get("/api/state").json()["queue"][0]["code"] == "TRV20/GY"
+    c.post(f"/api/products/{gy}/pause", json={"paused": True})
+    c.post("/api/autopilot", json={"autopilot": True, "auto_approve": True})
+    assert pipeline.tick()                                   # paused GY skipped -> BK runs
+    bk = next(q for q in c.get("/api/state").json()["saved"] if q["code"] == "TRV20/BK")
+    prod = c.get(f"/api/products/{bk['id']}").json()
+    made = [s["no"] for s in prod["shots"] if s["image"]]
+    assert made == [1, 3], made                               # only the shots in the sheet
+    assert all(s["qc"]["checks"]["product_exact"] for s in prod["shots"] if s["image"])
+    c.post(f"/api/products/{gy}/pause", json={"paused": False})
+    assert pipeline.tick()
+    gyp = c.get(f"/api/products/{gy}").json()
+    assert [s["no"] for s in gyp["shots"] if s["image"]] == [1, 3]
+    hows = {s["no"]: s["qc"]["v2"]["how"] for s in gyp["shots"] if s["image"]}
+    assert hows[1] == "fresh scene" and hows[3].startswith("pool scene"), hows   # hero fresh, detail reused (auto)
+    assert gyp["cost"] < prod["cost"] + 1e-9                  # second product cheaper thanks to the pool
+    # nothing else runs: PEN20/SI has no cut-out, NOT-A-CODE is not in the master
+    assert not pipeline.tick()
+    c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})

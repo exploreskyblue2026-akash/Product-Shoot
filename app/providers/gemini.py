@@ -174,3 +174,18 @@ class GeminiProvider:
         data = _json(r.text)
         checks = {k: bool(data.get("checks", {}).get(k, False)) for k in QC_CHECKS}
         return {"checks": checks, "reasons": data.get("reasons", {})}
+
+
+def _scene(self, prompt: str, model: str, size: str = IMAGE_SIZE) -> bytes:
+    """v2: an empty background scene, no product reference image."""
+    r = self._call(model_name(model), "image", contents=[prompt],
+                   config=types.GenerateContentConfig(response_modalities=["IMAGE"],
+                                                      image_config=types.ImageConfig(aspect_ratio="4:5", image_size=size)))
+    for cand in r.candidates or []:
+        for part in (cand.content.parts if cand.content else []) or []:
+            if part.inline_data and part.inline_data.data:
+                return part.inline_data.data
+    raise RuntimeError("Model returned no scene image")
+
+
+GeminiProvider.generate_scene = _scene

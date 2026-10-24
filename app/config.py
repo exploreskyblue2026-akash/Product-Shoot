@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "1.5.0 (v2 phase 1: Product Library)"
+APP_VERSION = "2.0.0 (v2: shoot-sheet queue, cut-out + scene, scene pool, v1/v2 switch)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

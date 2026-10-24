@@ -80,6 +80,11 @@ def process(pid: int, only: list[int] | None = None):
         raw = storage.read(p.raw_path)
         p.stage, p.error = "gen", ""
         s.commit()
+        if (p.data or {}).get("v2"):
+            from . import v2
+            stop_reason = v2.process(s, p, prov, only, _charge)
+            _finish(s, p, stop_reason)
+            return
         if not p.analysis:
             try:
                 analyse(s, p, prov, raw)
@@ -158,18 +163,26 @@ def process(pid: int, only: list[int] | None = None):
             if hero_gate and no == 1 and sh.status == "fail" and not only:
                 stop_reason = "Hero failed QC, other shots not generated (saves credits)"
                 break
-        p.error = stop_reason
-        s.commit()
-        s.refresh(p)
-        made = [sh for sh in p.shots if sh.image_path]
-        all_pass = bool(made) and all(sh.status in ("pass", "approved") for sh in made)
-        if all_pass and not p.error and get_setting(s, "auto_approve", True) and get_setting(s, "autopilot", False):
-            approve(s, p, "autopilot")
-        else:
-            p.stage = "review"
-            log(s, "autopilot" if get_setting(s, "autopilot", False) else "system", f"{p.code} ready for review")
-        p.data = {k: v for k, v in (p.data or {}).items() if k != "run_now"}
-        s.commit()
+        _finish(s, p, stop_reason)
+
+
+def _finish(s: Session, p: Product, stop_reason: str):
+    p.error = stop_reason
+    s.commit()
+    s.refresh(p)
+    made = [sh for sh in p.shots if sh.image_path]
+    all_pass = bool(made) and all(sh.status in ("pass", "approved") for sh in made)
+    if (p.data or {}).get("v2"):
+        from .v2 import requested_shots
+        want = requested_shots(s, p)
+        all_pass = all_pass and all(any(sh.no == n and sh.image_path for sh in p.shots) for n in want)
+    if all_pass and not p.error and get_setting(s, "auto_approve", True) and get_setting(s, "autopilot", False):
+        approve(s, p, "autopilot")
+    else:
+        p.stage = "review"
+        log(s, "autopilot" if get_setting(s, "autopilot", False) else "system", f"{p.code} ready for review")
+    p.data = {k: v for k, v in (p.data or {}).items() if k != "run_now"}
+    s.commit()
 
 
 def approve(s: Session, p: Product, who: str):
@@ -207,6 +220,8 @@ def approve(s: Session, p: Product, who: str):
 
 
 def rescan_watched(s: Session):
+    if get_setting(s, "pipeline_mode", "v1") == "v2":      # v2 works only from the shoot sheet: no random inputs
+        return
     from .ingest import scan
     due = now() - timedelta(minutes=config.WATCH_INTERVAL_MIN)
     for src in s.scalars(select(Source).where(Source.watch == True)):  # noqa: E712
@@ -229,6 +244,7 @@ def next_job(s: Session) -> int | None:
             return p.id
     if not get_setting(s, "autopilot", False):
         return None
+    v2mode = get_setting(s, "pipeline_mode", "v1") == "v2"
     over_day = day_spend(s) >= float(get_setting(s, "daily_budget", 3.0))
     if over_day or (get_setting(s, "budget_action", "pause") == "pause" and month_spend(s) >= float(get_setting(s, "budget_month", 150))):
         from .db import set_setting
@@ -236,8 +252,10 @@ def next_job(s: Session) -> int | None:
         log(s, "system", "Autopilot paused: " + ("daily" if over_day else "monthly") + " budget reached")
         s.commit()
         return None
-    p = s.scalars(select(Product).where(Product.stage.in_(["gen", "queue"])).order_by(Product.stage.asc(), Product.id)).first()  # "gen" (resume) before "queue"
-    return p.id if p else None
+    cands = [p for p in s.scalars(select(Product).where(Product.stage.in_(["gen", "queue"])))
+             if bool((p.data or {}).get("v2")) == v2mode and not (p.data or {}).get("paused")]
+    cands.sort(key=lambda p: (p.stage != "gen", (p.data or {}).get("priority", 10_000), p.id))   # resume first, then priority
+    return cands[0].id if cands else None
 
 
 def tick() -> bool:

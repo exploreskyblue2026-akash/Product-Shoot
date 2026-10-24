@@ -174,6 +174,19 @@ class LibImage(Base):
     cut_note: Mapped[str] = mapped_column(String(300), default="")
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
+
+class SceneAsset(Base):
+    """A generated empty scene (no product) that v2 can reuse for other products of the same brand/category/shot."""
+    __tablename__ = "scene_assets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pool_key: Mapped[str] = mapped_column(String(200), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    path: Mapped[str] = mapped_column(String(500))
+    uses: Mapped[int] = mapped_column(Integer, default=0)
+    used_by: Mapped[list] = mapped_column(JSON, default=list)
+    retired: Mapped[bool] = mapped_column(Boolean, default=False)
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
 def init_db():
     Base.metadata.create_all(engine)
 

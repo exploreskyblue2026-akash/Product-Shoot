@@ -140,8 +140,23 @@ def img_url(rel: str) -> str:
 
 def product_brief(p: Product) -> dict:
     done = sum(1 for sh in p.shots if sh.status in ("pass", "fail", "approved", "unchecked"))
-    return {"id": p.id, "code": p.code, "name": p.name, "brand": p.brand_id, "stage": p.stage, "done": done,
-            "error": p.error, "updated": p.updated.isoformat() if p.updated else ""}
+    d = p.data or {}
+    return {"id": p.id, "code": p.code, "name": p.name, "brand": d.get("brand_label") or p.brand_id, "stage": p.stage,
+            "done": done, "error": p.error, "updated": p.updated.isoformat() if p.updated else "",
+            "v2": bool(d.get("v2")), "priority": d.get("priority"), "paused": bool(d.get("paused")),
+            "shots_wanted": d.get("shots") or []}
+
+
+def v2_summary(s) -> dict:
+    from .db import LibImage as _LI
+    items = get_setting(s, "shoot_list", []) or []
+    keys = [i["key"] for i in items if i.get("key")]
+    ready = sum(1 for k in keys if s.scalar(select(_LI).where(_LI.key == k, _LI.primary == True,  # noqa: E712
+                                                                 _LI.cut_status.in_(["ok", "check"]))))
+    from .db import SceneAsset
+    return {"shoot": len(items), "in_master": len(keys), "ready": ready,
+            "scenes": s.scalar(select(func.count(SceneAsset.id)).where(SceneAsset.retired == False)) or 0,  # noqa: E712
+            "strategy": get_setting(s, "scene_strategy", "auto")}
 
 
 @app.get("/api/state")
@@ -151,6 +166,7 @@ def state(u=Depends(need("viewer"))):
         spend_today = float(s.scalar(select(func.coalesce(func.sum(Usage.cost), 0.0)).where(Usage.ts >= today)) or 0)
         prods = list(s.scalars(select(Product).where(Product.stage != "rejected").order_by(Product.id)))
         srcs = list(s.scalars(select(Source).order_by(Source.id.desc())))
+        mode = get_setting(s, "pipeline_mode", "v1")
         counts = {}
         for p in prods:
             counts.setdefault(p.source_id, 0)
@@ -164,7 +180,10 @@ def state(u=Depends(need("viewer"))):
             "budget": get_setting(s, "budget_month", 150),
             "sources": [{"id": x.id, "type": x.type, "name": x.name, "detail": x.detail, "watch": x.watch,
                          "status": x.status, "error": x.error, "count": counts.get(x.id, 0)} for x in srcs],
-            "queue": [product_brief(p) for p in prods if p.stage in ("queue", "gen", "review", "error", "needs_photo")],
+            "queue": sorted([product_brief(p) for p in prods if p.stage in ("queue", "gen", "review", "error", "needs_photo")
+                             and bool((p.data or {}).get("v2")) == (mode == "v2")],
+                            key=lambda q: (q["priority"] if q["priority"] is not None else 10_000, q["id"])),
+            "pipeline_mode": mode, "v2": v2_summary(s) if mode == "v2" else None,
             "saved": [product_brief(p) for p in reversed(prods) if p.stage == "saved"][:200],
         }
 
@@ -254,6 +273,7 @@ def rescan(sid: int, u=Depends(need("editor"))):
 
 
 class AutoIn(BaseModel):
+    pipeline_mode: str | None = None
     autopilot: bool | None = None
     auto_approve: bool | None = None
     publish_shopify: bool | None = None
@@ -265,6 +285,10 @@ def autopilot(body: AutoIn, u=Depends(need("editor"))):
     with SessionLocal() as s:
         for k, v in body.model_dump(exclude_none=True).items():
             set_setting(s, k, v)
+        if body.pipeline_mode is not None:
+            if body.pipeline_mode not in ("v1", "v2"):
+                raise HTTPException(400, "pipeline_mode must be v1 or v2")
+            log(s, u.email, "Pipeline switched to " + body.pipeline_mode)
         if body.autopilot:
             pipeline.STOP.clear()
         if body.autopilot is not None:
@@ -304,6 +328,10 @@ def approve(pid: int, body: ApproveIn | None = None, u=Depends(need("editor"))):
         if not any(sh.image_path for sh in p.shots):
             raise HTTPException(400, "Nothing generated yet")
         missing = [sh.no for sh in p.shots if not sh.image_path]
+        if (p.data or {}).get("v2"):
+            from .v2 import requested_shots
+            have = {sh.no for sh in p.shots if sh.image_path}
+            missing = [n for n in requested_shots(s, p) if n not in have]
         if missing and not body.save_now:
             # approve what exists, then make the remaining shots; the product is saved once they are done
             for sh in p.shots:
@@ -357,6 +385,10 @@ def regenerate(pid: int, body: RegenIn, u=Depends(need("editor"))):
         for sh in p.shots:
             if sh.no == body.shot:
                 sh.status, sh.note = "wait", body.note.strip()[:500]
+                scene = ((sh.qc or {}).get("v2") or {}).get("scene")
+                if scene and "pool" in ((sh.qc or {}).get("v2") or {}).get("how", ""):
+                    from .v2 import retire_scene
+                    retire_scene(s, scene)          # you didn't like it: never reuse it for other products
         p.data = {**(p.data or {}), "run_now": True, "only_shots": [body.shot]}
         p.stage = "queue"
         log(s, u.email, f"Regenerate {p.code} shot {body.shot}" + (f": {body.note[:80]}" if body.note else ""))
@@ -537,7 +569,7 @@ def test_conn(what: str, u=Depends(need("admin"))):
     raise HTTPException(404)
 
 
-SETTING_KEYS = ["auto_approve", "retries", "publish_shopify", "budget_month", "budget_action", "model_hero_detail",
+SETTING_KEYS = ["pipeline_mode", "scene_strategy", "scene_reuse", "fresh_brands", "auto_approve", "retries", "publish_shopify", "budget_month", "budget_action", "model_hero_detail",
                 "model_other", "file_naming", "min_raw_px", "output_drive_folder", "cost_mode", "default_shots",
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr"]
 
@@ -800,5 +832,56 @@ def library_clear(u=Depends(need("admin"))):
     with SessionLocal() as s:
         library.clear(s)
         log(s, u.email, "Library images cleared")
+        s.commit()
+    return {"ok": True}
+
+
+
+# ---------------------------------------------------------------- v2 · studio queue from the shoot sheet
+@app.post("/api/v2/load-shoot")
+def v2_load(u=Depends(need("editor"))):
+    from . import v2
+    with SessionLocal() as s:
+        try:
+            r = v2.load_shoot_sheet(s)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        log(s, u.email, f"Loaded shoot sheet into the queue ({r['total']} codes)")
+        s.commit()
+    pipeline.STOP.clear()
+    return {"ok": True, **r}
+
+
+class MoveIn(BaseModel):
+    to: str = "up"          # up | down | top | bottom
+
+
+@app.post("/api/products/{pid}/move")
+def move(pid: int, body: MoveIn, u=Depends(need("editor"))):
+    with SessionLocal() as s:
+        p = _get(s, pid)
+        v2flag = bool((p.data or {}).get("v2"))
+        q = [x for x in s.scalars(select(Product).where(Product.stage.in_(["queue", "gen", "review", "error", "needs_photo"])))
+             if bool((x.data or {}).get("v2")) == v2flag]
+        q.sort(key=lambda x: ((x.data or {}).get("priority", 10_000), x.id))
+        i = q.index(p)
+        j = {"up": max(0, i - 1), "down": min(len(q) - 1, i + 1), "top": 0, "bottom": len(q) - 1}.get(body.to, i)
+        q.insert(j, q.pop(i))
+        for n, x in enumerate(q, 1):
+            x.data = {**(x.data or {}), "priority": n}
+        s.commit()
+    return {"ok": True}
+
+
+class PauseIn(BaseModel):
+    paused: bool
+
+
+@app.post("/api/products/{pid}/pause")
+def pause(pid: int, body: PauseIn, u=Depends(need("editor"))):
+    with SessionLocal() as s:
+        p = _get(s, pid)
+        p.data = {**(p.data or {}), "paused": body.paused}
+        log(s, u.email, f"{'Paused' if body.paused else 'Resumed'} {p.code}")
         s.commit()
     return {"ok": True}

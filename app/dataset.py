@@ -13,6 +13,10 @@ DEFAULT_STRENGTH = {"lighting": "strict", "attention": "normal", "size": "normal
                     "props": "normal", "negative_space": "relaxed"}
 
 DEFAULT_SETTINGS = {
+    "pipeline_mode": "v1",         # v1: AI draws product + scene · v2: real cut-out + AI scene, shoot sheet only
+    "scene_strategy": "auto",      # v2 scenes: auto | mix | pool | fresh
+    "scene_reuse": 10,             # v2: a pool scene is reused for at most this many products
+    "fresh_brands": "",            # v2: brands that always get fresh scenes (comma separated)
     "autopilot": False,
     "auto_approve": True,          # approve when every QC check passes
     "retries": 0,                  # automatic regenerations after a QC fail (each one costs a full image)
@@ -187,6 +191,6 @@ def build_prompts(s: Session, product, analysis: dict, rv: RuleVersion, notes: d
                       "The product is the clear hero. " + ATTN_TEXT[st["attention"]])
         if notes and notes.get(sh["no"]):
             p += f"\n\n[ADJUSTMENT FROM REVIEWER]\n{notes[sh['no']]}"
-        out.append({"no": sh["no"], "kind": sid, "prompt": p,
+        out.append({"no": sh["no"], "kind": sid, "prompt": p, "fill": fill, "light": LIGHT_TEXT[st["lighting"]],
                     "model_setting": SHOT_MODEL.get(sid, "model_other")})
     return out
