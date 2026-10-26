@@ -95,6 +95,20 @@ def import_master(s: Session, data: bytes, filename: str = "master.xlsx") -> dic
     return {"added": added, "updated": updated, "tabs": tabs}
 
 
+def focus_index(s: Session, idx: dict | None = None) -> dict:
+    """Only the products in the shoot sheet (when one is loaded and focus is on): the scan touches nothing else."""
+    idx = idx if idx is not None else _index(s)
+    keys = {i["key"] for i in (get_setting(s, "shoot_list", []) or []) if i.get("key")}
+    if not keys or not get_setting(s, "library_focus", True):
+        return idx
+    return {k: p for k, p in idx.items() if p.key in keys}
+
+
+def _variants(key: str) -> set:
+    """A code and its one-letter-off spellings (PPIP25RD ~ PIP25RD) for a quick 'is it on this page' test."""
+    return {key} | {key[:i] + key[i + 1:] for i in range(len(key))} if len(key) >= 6 else {key}
+
+
 def _index(s: Session) -> dict[str, LibProduct]:
     """Every way a product can be referred to (product id, item code, EAN) -> product."""
     idx = {}
@@ -219,7 +233,7 @@ def add_image(s: Session, data: bytes, name: str, source: str = "file", key: str
     s.flush()
     if key:
         pick_primary(s, key)
-        if img.dup_of is None and not cutouts_on(s):
+        if img.dup_of is None and not cutouts_on(s) and get_setting(s, "library_drive_copy", False):
             save_original_to_drive(s, img, data)
     return img
 
@@ -255,7 +269,7 @@ def add_files(s: Session, files: list[tuple[str, bytes]]) -> dict:
                     if n.lower().endswith(IMG_EXT) and not n.startswith("__MACOSX"):
                         stats["images"] += bool(add_image(s, z.read(n), n, "file", idx=idx))
         elif low.endswith(".pdf"):
-            stats["catalogue_images"] += add_catalogue(s, data, name, idx=idx)
+            stats["catalogue_images"] += add_catalogue(s, data, name, idx=focus_index(s, idx))
         elif low.endswith(IMG_EXT):
             stats["images"] += bool(add_image(s, data, name, "file", idx=idx))
         else:
@@ -287,7 +301,12 @@ def add_catalogue(s: Session, pdf: bytes, filename: str, idx=None) -> int:
     idx = idx if idx is not None else _index(s)
     doc = fitz.open(stream=pdf, filetype="pdf")
     added = 0
+    want = set().union(*[_variants(p.key) for p in set(idx.values())]) if idx else set()
     for pno, page in enumerate(doc, 1):
+        if want and len(idx) < 400:                    # focus mode: skip pages that mention none of the codes
+            flat = norm(page.get_text())
+            if not any(v in flat for v in want):
+                continue
         W = page.rect.width
         pics = [i for i in page.get_image_info(xrefs=True)
                 if i["xref"] and (i["bbox"][2] - i["bbox"][0]) < W * 0.7 and (i["bbox"][3] - i["bbox"][1]) > 40]
@@ -348,7 +367,7 @@ def scan_drive(s: Session, link: str) -> dict:
         token = None
         while True:
             r = svc.files().list(q=f"'{cur}' in parents and trashed=false", pageToken=token, pageSize=200,
-                                 fields="nextPageToken, files(id,name,mimeType)", supportsAllDrives=True,
+                                 fields="nextPageToken, files(id,name,mimeType,md5Checksum,modifiedTime)", supportsAllDrives=True,
                                  includeItemsFromAllDrives=True, corpora="allDrives").execute()
             for f in r.get("files", []):
                 if f["mimeType"] == "application/vnd.google-apps.folder":
@@ -368,7 +387,12 @@ def scan_drive(s: Session, link: str) -> dict:
     stats = {"sheets": [], "images": 0, "catalogue_images": 0, "already": 0}
     # sheets first (master before shoot, so codes can be resolved)
     loaded = []
+    seen = dict(get_setting(s, "sheet_versions", {}) or {})
     for f in sheets:
+        ver = f.get("md5Checksum") or f.get("modifiedTime") or ""
+        if ver and seen.get(f["id"]) == ver:            # unchanged since the last scan: skip
+            continue
+        seen[f["id"]] = ver
         if f["mimeType"] == "application/vnd.google-apps.spreadsheet":
             data = svc.files().export(fileId=f["id"], mimeType=(
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).execute()
@@ -378,7 +402,11 @@ def scan_drive(s: Session, link: str) -> dict:
     loaded.sort(key=lambda x: 0 if _is_master(x[1]) else 1)
     for name, data in loaded:
         stats["sheets"].append(add_sheet(s, data, name))
-    idx = _index(s)
+    set_setting(s, "sheet_versions", seen)
+    s.commit()
+    idx = focus_index(s)
+    focused = len(idx) < len(_index(s))
+    stats["skipped_not_in_sheet"] = 0
     for f in files:
         if f["id"] in known:
             stats["already"] += 1
@@ -389,6 +417,9 @@ def scan_drive(s: Session, link: str) -> dict:
             s.add(LibImage(key="", source="marker", drive_id=f["id"], cut_status="skip", src_name=f["name"]))
         elif f["mimeType"].startswith("image/") or low.endswith(IMG_EXT):
             p = key_from_name(f["path"], idx)
+            if focused and not p:                      # not a shoot-sheet product: don't even download it
+                stats["skipped_not_in_sheet"] += 1
+                continue
             if add_image(s, google.download(f["id"]), f["path"], "drive", key=p.key if p else "", drive_id=f["id"], idx=idx):
                 stats["images"] += 1
         s.commit()
