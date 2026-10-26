@@ -212,6 +212,7 @@ def test_library_phase1():
     import io, time
     from PIL import Image
     c = client()
+    c.put("/api/admin/settings", json={"library_cutouts": True})
     LIB = Path(__file__).parent / "library"
     def png(color, size=(900, 900), alpha=False):
         im = Image.new("RGBA" if alpha else "RGB", size, (255, 255, 255, 0) if alpha else (255, 255, 255))
@@ -259,6 +260,7 @@ def test_v2_shoot_sheet_only():
     import io, time, openpyxl
     from PIL import Image, ImageDraw
     c = client()
+    c.put("/api/admin/settings", json={"library_cutouts": True})
     LIB = Path(__file__).parent / "library"
     def photo(color):
         im = Image.new("RGB", (1000, 1000), (255, 255, 255))
@@ -334,3 +336,69 @@ def test_saved_hero_only_can_make_more():
     pipeline.tick()
     prod = c.get(f"/api/products/{pid}").json()
     assert all(s["image"] for s in prod["shots"])
+
+
+
+def test_shoot_sheet_with_original_photos():
+    """Default (no cut-outs): Library keeps originals grouped by code; shoot sheet drives v1 AI generation with
+    several reference photos; only listed codes and shots are generated."""
+    import io, time, openpyxl
+    from PIL import Image, ImageDraw
+    from app.providers import mock
+    c = client()
+    c.put("/api/admin/settings", json={"library_cutouts": False, "max_cost_product": 5, "daily_budget": 100,
+                                       "default_shots": [1, 2, 3, 4, 5], "hero_gate": False})
+    c.post("/api/library/clear")
+    LIB = Path(__file__).parent / "library"
+    def photo(color, size=1200, side=False):
+        im = Image.new("RGB", (size, size), (250, 250, 250))
+        d = ImageDraw.Draw(im)
+        if side:
+            d.rectangle([size // 10, size // 2 - size // 20, size * 9 // 10, size // 2 + size // 20], fill=color)
+        else:
+            d.ellipse([size // 4, size // 4, size * 3 // 4, size * 3 // 4], fill=color)
+        b = io.BytesIO(); im.save(b, "JPEG"); return b.getvalue()
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["SHOOT", "SHOTS", "PRIORITY", "NOTE"])
+    ws.append(["PEN20/YE", "1,2", 1, ""]); ws.append(["PEN20/RD", "", 2, ""]); ws.append(["PEN20/BK", "", 3, ""])
+    b = io.BytesIO(); wb.save(b)
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "x/y")),
+                                         ("files", ("orig_shoot.xlsx", b.getvalue(), "x/y")),
+                                         ("files", ("PEN20-YE front.jpg", photo((240, 200, 0)), "image/jpeg")),
+                                         ("files", ("PEN20-YE side.jpg", photo((230, 190, 0), 900, True), "image/jpeg")),
+                                         ("files", ("PEN20-YE side copy.jpg", photo((230, 190, 0), 600, True), "image/jpeg")),
+                                         ("files", ("PEN20_RD.jpg", photo((200, 0, 0)), "image/jpeg"))])
+    for _ in range(100):
+        st = c.get("/api/library").json()
+        if not st["job"]["running"]:
+            break
+        time.sleep(0.1)
+    assert st["cutouts"] is False and c.get("/api/library/pending").json() == []
+    rows = {r["code"]: r for r in st["rows"]}
+    assert rows["PEN20/YE"]["status"] == "ready" and rows["PEN20/YE"]["images"] == 2 and rows["PEN20/YE"]["dups"] == 1
+    assert rows["PEN20/RD"]["status"] == "ready" and rows["PEN20/BK"]["status"] == "needs_photo"
+    seen = {}
+    orig = mock.MockProvider.generate
+    def spy(self, prompt, raw, model, size="1K", refs=None):
+        seen.setdefault("refs", []).append(len(refs or []))
+        return orig(self, prompt, raw, model, size)
+    mock.MockProvider.generate = spy
+    try:
+        c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": True, "auto_approve": True})
+        r = c.post("/api/v2/load-shoot").json()
+        assert r["total"] == 3 and r["waiting"] == 1, r
+        while pipeline.tick():
+            pass
+    finally:
+        mock.MockProvider.generate = orig
+        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+    c.post("/api/autopilot", json={"pipeline_mode": "v2"})
+    st = c.get("/api/state").json()
+    allp = {q["code"]: q for q in st["queue"] + st["saved"]}
+    ye = c.get(f"/api/products/{allp['PEN20/YE']['id']}").json()
+    rd = c.get(f"/api/products/{allp['PEN20/RD']['id']}").json()
+    assert [s["no"] for s in ye["shots"] if s["image"]] == [1, 2]                  # only the listed shots
+    assert [s["no"] for s in rd["shots"] if s["image"]] == [1, 2, 3, 4, 5]         # blank = default (all 5)
+    assert allp["PEN20/BK"]["stage"] == "needs_photo"
+    assert 1 in seen["refs"]                                                       # YE got its second angle
+    c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})

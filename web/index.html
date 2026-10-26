@@ -121,8 +121,8 @@ body{margin:0}[hidden]{display:none!important}
     </div>
 
     <div class="mode" role="radiogroup" aria-label="Pipeline">
-      <button type="button" role="radio" data-mode="v1" aria-checked="true"><b>v1 · AI full shot</b><small>AI redraws product + scene</small></button>
-      <button type="button" role="radio" data-mode="v2" aria-checked="false"><b>v2 · Cut-out + scene</b><small>Real product, only shoot-sheet codes</small></button>
+      <button type="button" role="radio" data-mode="v1" aria-checked="true"><b>Add input</b><small>Any files/folders you add here</small></button>
+      <button type="button" role="radio" data-mode="v2" aria-checked="false"><b>Shoot sheet</b><small>Only the codes + shots in the sheet</small></button>
     </div>
     <section class="auto" aria-labelledby="ap-h">
       <h2 id="ap-h">Autopilot</h2>
@@ -144,7 +144,7 @@ body{margin:0}[hidden]{display:none!important}
       <div class="sec-h"><h2 id="v2-h"><span class="step-n">1</span>Shoot sheet</h2><a class="btn sm" href="/library">Open Library</a></div>
       <p class="hint" style="margin:0" id="v2-sum">—</p>
       <button class="btn primary" type="button" id="v2-load" style="width:100%">Load shoot sheet into queue</button>
-      <p class="hint" style="margin:0">Only the codes in the shoot sheet are queued, with only the shots it asks for. Drive folders are not watched in v2.</p>
+      <p class="hint" style="margin:0">Only the codes in the shoot sheet are queued, with only the shots it asks for. The AI gets each product's best Library photos (up to 3 angles). Drive folders are not watched in this mode.</p>
     </section>
 
     <section class="sec v1only" aria-labelledby="in-h">
@@ -241,7 +241,7 @@ async function refresh(){try{S=await api("/api/state");if(!cur){const f=S.queue.
 function renderLeft(){
   const v2=S.pipeline_mode=="v2";document.querySelectorAll(".mode [data-mode]").forEach(b=>b.setAttribute("aria-checked",b.dataset.mode==S.pipeline_mode));
   $("#v2-box").hidden=!v2;document.querySelectorAll(".v1only").forEach(x=>x.hidden=v2);
-  if(v2&&S.v2){const m=S.v2;$("#v2-sum").textContent=m.shoot?`${m.shoot} codes in the shoot sheet · ${m.in_master} found in master · ${m.ready} with a ready cut-out · ${m.scenes} scenes in the pool (${m.strategy})`:"No shoot sheet yet. Add it on the Library page."}
+  if(v2&&S.v2){const m=S.v2;$("#v2-sum").textContent=m.shoot?(m.cutouts?`${m.shoot} codes in the shoot sheet · ${m.in_master} found in master · ${m.ready} with a ready cut-out · ${m.scenes} scenes in the pool (${m.strategy})`:`${m.shoot} codes in the shoot sheet · ${m.in_master} found in master · ${m.ready} with photos in the Library`):"No shoot sheet yet. Add it on the Library page."}
   const a=S.autopilot;$("#ap").setAttribute("aria-checked",!!a.autopilot);$("#ap-label").textContent=a.autopilot?"On · working through the queue":"Off · start the queue";
   $("#o-approve").checked=!!a.auto_approve;$("#o-shopify").checked=!!a.publish_shopify;$("#o-retry").checked=(a.retries||0)>0;
   $("#s-queue").textContent=S.queue.filter(q=>q.stage=="queue"||q.stage=="gen").length;$("#s-saved").textContent=S.saved.length;$("#s-rev").textContent=S.queue.filter(q=>q.stage=="review"||q.stage=="error").length;
@@ -289,7 +289,7 @@ document.addEventListener("click",e=>{
 async function setAuto(body){try{await api("/api/autopilot",{method:"POST",body});await refresh()}catch(e){toast(e.message)}}
 $("#ap").addEventListener("click",()=>{const on=$("#ap").getAttribute("aria-checked")!=="true";setAuto({autopilot:on});toast(on?"Autopilot on":"Autopilot off")});
 document.querySelectorAll(".mode [data-mode]").forEach(b=>b.addEventListener("click",async()=>{if(b.getAttribute("aria-checked")=="true")return;
-  try{await api("/api/autopilot",{method:"POST",body:{pipeline_mode:b.dataset.mode}});cur=null;P=null;toast(b.dataset.mode=="v2"?"v2 on: only shoot-sheet codes, real product + scene":"v1 on: AI generates the full shot");await refresh()}catch(e){toast(e.message)}}));
+  try{await api("/api/autopilot",{method:"POST",body:{pipeline_mode:b.dataset.mode}});cur=null;P=null;toast(b.dataset.mode=="v2"?"Shoot sheet mode: only the codes and shots in the sheet":"Add input mode");await refresh()}catch(e){toast(e.message)}}));
 $("#v2-load").addEventListener("click",async()=>{try{const r=await api("/api/v2/load-shoot",{method:"POST"});toast(`${r.total} codes: ${r.total-r.waiting-r.missing} ready to generate, ${r.waiting} waiting for photo/cut-out, ${r.missing} not in master`);await refresh()}catch(e){toast(e.message)}});
 $("#stop-all").addEventListener("click",async()=>{try{await api("/api/stop",{method:"POST"});toast("Stopping: the current image finishes, nothing new starts");await refresh()}catch(e){toast(e.message)}});
 $("#o-approve").addEventListener("change",e=>setAuto({auto_approve:e.target.checked}));

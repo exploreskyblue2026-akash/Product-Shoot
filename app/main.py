@@ -151,12 +151,14 @@ def v2_summary(s) -> dict:
     from .db import LibImage as _LI
     items = get_setting(s, "shoot_list", []) or []
     keys = [i["key"] for i in items if i.get("key")]
+    from .library import cutouts_on
+    ok = ["ok", "check"] if cutouts_on(s) else ["pending", "ok", "check"]
     ready = sum(1 for k in keys if s.scalar(select(_LI).where(_LI.key == k, _LI.primary == True,  # noqa: E712
-                                                                 _LI.cut_status.in_(["ok", "check"]))))
+                                                                 _LI.cut_status.in_(ok))))
     from .db import SceneAsset
     return {"shoot": len(items), "in_master": len(keys), "ready": ready,
             "scenes": s.scalar(select(func.count(SceneAsset.id)).where(SceneAsset.retired == False)) or 0,  # noqa: E712
-            "strategy": get_setting(s, "scene_strategy", "auto")}
+            "strategy": get_setting(s, "scene_strategy", "auto"), "cutouts": cutouts_on(s)}
 
 
 @app.get("/api/state")
@@ -573,7 +575,7 @@ def test_conn(what: str, u=Depends(need("admin"))):
     raise HTTPException(404)
 
 
-SETTING_KEYS = ["pipeline_mode", "scene_strategy", "scene_reuse", "fresh_brands", "auto_approve", "retries", "publish_shopify", "budget_month", "budget_action", "model_hero_detail",
+SETTING_KEYS = ["library_cutouts", "pipeline_mode", "scene_strategy", "scene_reuse", "fresh_brands", "auto_approve", "retries", "publish_shopify", "budget_month", "budget_action", "model_hero_detail",
                 "model_other", "file_naming", "min_raw_px", "output_drive_folder", "cost_mode", "default_shots",
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr"]
 
@@ -807,6 +809,9 @@ def library_image(iid: int, body: ImgAct, u=Depends(need("editor"))):
             img.cut_status, img.cut_path, img.cut_note = "pending", "", ""
         elif body.action == "skip":
             img.cut_status = "skip"
+            if not library.cutouts_on(s):
+                img.primary = False
+                library.pick_primary(s, img.key)        # next-best photo of the same product takes over
         elif body.action == "primary":
             library.pick_primary(s, img.key, force_id=img.id)
         elif body.action == "assign":

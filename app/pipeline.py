@@ -80,7 +80,7 @@ def process(pid: int, only: list[int] | None = None):
         raw = storage.read(p.raw_path)
         p.stage, p.error = "gen", ""
         s.commit()
-        if (p.data or {}).get("v2"):
+        if (p.data or {}).get("v2") and (p.data or {}).get("engine") == "composite":
             from . import v2
             stop_reason = v2.process(s, p, prov, only, _charge)
             _finish(s, p, stop_reason)
@@ -109,6 +109,15 @@ def process(pid: int, only: list[int] | None = None):
         cap = float(get_setting(s, "max_cost_product", 0.30))
         hero_gate = bool(get_setting(s, "hero_gate", True))
         defaults = [int(x) for x in (get_setting(s, "default_shots", [1]) or [1])]
+        if (p.data or {}).get("v2"):                    # shoot sheet: only the shots it asks for
+            from .v2 import requested_shots
+            defaults = requested_shots(s, p)
+        refs = []
+        for rel in ((p.data or {}).get("refs") or [])[1:]:   # extra angles of the same product from the Library
+            try:
+                refs.append(storage.read(rel))
+            except Exception:
+                pass
         todo = only or [no for no in defaults if shots[no].status in ("wait", "gen", "fail") or not shots[no].image_path]
         stop_reason = ""
         for no in sorted(todo):
@@ -128,7 +137,7 @@ def process(pid: int, only: list[int] | None = None):
                     stop_reason = f"Stopped at the ${cap:.2f} per-product cost limit"
                     break
                 sh.attempts = (sh.attempts or 0) + 1
-                img = storage.to_output(prov.generate(prompt, raw, model, size))
+                img = storage.to_output(prov.generate(prompt, raw, model, size, refs=refs))
                 used = getattr(prov, "last_model", None) or model     # may differ after a fallback
                 sh.model = used
                 _charge(s, p, "image", used, config.image_cost(used, size), sh)

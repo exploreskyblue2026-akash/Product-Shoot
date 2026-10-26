@@ -13,6 +13,7 @@ DEFAULT_STRENGTH = {"lighting": "strict", "attention": "normal", "size": "normal
                     "props": "normal", "negative_space": "relaxed"}
 
 DEFAULT_SETTINGS = {
+    "library_cutouts": False,      # False: keep original photos (AI generation). True: cut-outs + composite engine
     "pipeline_mode": "v1",         # v1: AI draws product + scene · v2: real cut-out + AI scene, shoot sheet only
     "scene_strategy": "auto",      # v2 scenes: auto | mix | pool | fresh
     "scene_reuse": 10,             # v2: a pool scene is reused for at most this many products

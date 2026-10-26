@@ -64,7 +64,7 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
 <main>
   <section class="panel" aria-labelledby="h-add">
     <div class="panel-h"><h2 id="h-add">1 · Add to the library</h2><span class="chip mute" id="job">Idle</span></div>
-    <p class="hint" style="margin-top:0">Drop anything: master sheet, shoot sheet (SHOOT · SHOTS · PRIORITY · NOTE), photos, ZIPs, catalogue PDFs. Photos are matched to products by the code in the file or folder name.</p>
+    <p class="hint" style="margin-top:0">Drop anything: master sheet, shoot sheet (SHOOT · SHOTS · PRIORITY · NOTE), photos, ZIPs, catalogue PDFs. Photos are matched to products by the code in the file or folder name, duplicates dropped, and the originals kept grouped by code (also in Drive → Product library, if that folder exists).</p>
     <div class="row">
       <label class="field">Google Drive folder or Shared drive link<input id="drive" placeholder="https://drive.google.com/drive/folders/…"></label>
       <button class="btn primary" id="scan" type="button">Scan Drive</button>
@@ -72,7 +72,7 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
     <div class="drop" id="drop" tabindex="0" role="button" style="margin-top:12px">Drop files here or click to choose<input type="file" id="files" multiple hidden accept=".jpg,.jpeg,.png,.webp,.zip,.pdf,.xlsx,.xlsm"></div>
   </section>
 
-  <section class="panel" aria-labelledby="h-cut">
+  <section class="panel" aria-labelledby="h-cut" id="cut-panel">
     <div class="panel-h"><h2 id="h-cut">2 · Cut-out queue</h2>
       <div class="row" style="align-items:center">
         <label class="hint"><input type="checkbox" id="auto" checked> Cut out automatically while this page is open</label>
@@ -101,11 +101,12 @@ let D=null, filter="shoot", done=0, total=0, lib=null, running=false, pauseUntil
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("on"),3500)}
 async function api(p,o={}){const r=await fetch(p,{credentials:"same-origin",...o,headers:o.body&&!(o.body instanceof FormData)?{"Content-Type":"application/json"}:{},body:o.body&&!(o.body instanceof FormData)?JSON.stringify(o.body):o.body});
   if(r.status==401){location.href="/login";throw new Error("Signed out")} const j=await r.json().catch(()=>({})); if(!r.ok)throw new Error(j.detail||r.statusText); return j}
-const ST={ready:["ok","Ready"],check:["warn","Check cut-out"],cutting:["info","Waiting for cut-out"],needs_photo:["bad","Needs photo"],not_in_master:["bad","Not in master sheet"],skipped:["mute","Skipped"]};
+const ST={ready:["ok","Ready"],skipped:["mute","Photo not used"],check:["warn","Check cut-out"],cutting:["info","Waiting for cut-out"],needs_photo:["bad","Needs photo"],not_in_master:["bad","Not in master sheet"],skipped:["mute","Skipped"]};
 async function load(){try{D=await api("/api/library");render()}catch(e){toast(e.message)}}
 function render(){
   const j=D.job; $("#job").className="chip "+(j.error?"bad":j.running?"info":"mute"); $("#job").textContent=j.error||j.msg||"Idle";
   if(!$("#drive").value&&D.drive_link)$("#drive").value=D.drive_link;
+  $("#cut-panel").hidden=!D.cutouts;
   const c=D.counts, rows=D.rows, shoot=rows.filter(r=>r.in_shoot).length;
   const tabs=[["shoot","Shoot sheet",shoot],["all","All with photos",rows.filter(r=>r.images).length],["ready","Ready",c.ready||0],["check","Check",c.check||0],["cutting","Waiting",c.cutting||0],["needs_photo","Needs photo",(c.needs_photo||0)+(c.not_in_master||0)]];
   $("#stats").innerHTML=tabs.map(([k,l,n])=>`<button type="button" data-f="${k}" aria-pressed="${filter==k}"><b>${n}</b>${l}</button>`).join("")+`<span class="hint" style="align-self:center">${D.products} products in master · ${D.images} images</span>`;
@@ -117,10 +118,12 @@ function render(){
 }
 function card(r){const s=ST[r.status]||["mute",r.status], p=r.primary;
   return `<article class="card"><div class="h"><div style="min-width:0"><b>${esc(r.code)}</b><div class="nm" title="${esc(r.name)}">${esc(r.brand?r.brand+" · ":"")}${esc(r.name)}</div></div><span class="chip ${s[0]}">${s[1]}</span></div>
-  ${p?`<div class="pics"><div class="pic"><img src="${esc(p.src)}" alt="Raw photo" loading="lazy"><small>${p.w}×${p.h}</small></div><div class="pic chk">${p.cut?`<img src="${esc(p.cut)}?v=${p.id}${p.status}" alt="Cut-out" loading="lazy">`:'<span class="hint">cut-out…</span>'}</div></div>`:""}
+  ${p&&!D.cutouts?`<div class="pic" style="aspect-ratio:4/3"><img src="${esc(p.src)}" alt="Main photo" loading="lazy"><small>${p.w}×${p.h} · main photo</small></div>`:""}
+  ${p&&D.cutouts?`<div class="pics"><div class="pic"><img src="${esc(p.src)}" alt="Raw photo" loading="lazy"><small>${p.w}×${p.h}</small></div><div class="pic chk">${p.cut?`<img src="${esc(p.cut)}?v=${p.id}${p.status}" alt="Cut-out" loading="lazy">`:'<span class="hint">cut-out…</span>'}</div></div>`:""}
   ${r.all&&r.all.length>1?`<div class="thumbs" aria-label="Other photos">${r.all.map(i=>`<button type="button" aria-pressed="${i.primary}" data-act="primary" data-id="${i.id}" title="Use this photo (${i.w}×${i.h})"><img src="${esc(i.src)}" alt=""></button>`).join("")}</div>`:""}
   ${r.notes?`<div class="note">${esc(r.notes)}</div>`:""}${r.in_shoot?`<div class="hint">Shots: ${r.shots.length?r.shots.join(", "):"default"}${r.note?" · "+esc(r.note):""}</div>`:""}
-  ${p&&p.cut?`<div class="acts"><button class="btn sm" data-act="ok" data-id="${p.id}" type="button">✓ OK</button><button class="btn sm" data-act="redo" data-id="${p.id}" type="button">↻ Redo</button><button class="btn sm danger" data-act="skip" data-id="${p.id}" type="button">✕ Skip</button></div>`:""}</article>`}
+  ${p&&!D.cutouts?`<div class="acts"><button class="btn sm danger" data-act="skip" data-id="${p.id}" type="button" title="Don't use this photo">✕ Don't use this photo</button></div>`:""}
+  ${p&&D.cutouts&&p.cut?`<div class="acts"><button class="btn sm" data-act="ok" data-id="${p.id}" type="button">✓ OK</button><button class="btn sm" data-act="redo" data-id="${p.id}" type="button">↻ Redo</button><button class="btn sm danger" data-act="skip" data-id="${p.id}" type="button">✕ Skip</button></div>`:""}</article>`}
 
 document.addEventListener("click",async e=>{
   const f=e.target.closest("[data-f]"); if(f){filter=f.dataset.f;render();return}

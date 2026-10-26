@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "2.0.1 (make shots 2-5 on saved products)"
+APP_VERSION = "2.1.0 (shoot sheet + Library originals, v1 AI generation with multi-angle references)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

@@ -18,7 +18,7 @@ from .db import LibImage, LibProduct, get_setting, set_setting, log
 
 IMG_EXT = (".jpg", ".jpeg", ".png", ".webp")
 LOW_RES = 800            # long side below this = flagged "low resolution"
-SKIP_FOLDERS = ("final output", "cutouts library")
+SKIP_FOLDERS = ("final output", "cutouts library", "product library")
 
 
 def norm(code) -> str:
@@ -219,6 +219,8 @@ def add_image(s: Session, data: bytes, name: str, source: str = "file", key: str
     s.flush()
     if key:
         pick_primary(s, key)
+        if img.dup_of is None and not cutouts_on(s):
+            save_original_to_drive(s, img, data)
     return img
 
 
@@ -230,7 +232,8 @@ def pick_primary(s: Session, key: str, force_id: int | None = None):
     cur = next((i for i in imgs if i.primary), None)
     best = next((i for i in imgs if i.id == force_id), None)
     if best is None:
-        best = cur if cur and cur.cut_status in ("ok", "check") else max(imgs, key=lambda i: i.w * i.h)
+        usable = [i for i in imgs if i.cut_status != "skip"] or imgs
+        best = cur if cur and cur.cut_status in ("ok", "check") else max(usable, key=lambda i: i.w * i.h)
     for i in imgs:
         i.primary = i is best
     for i in s.scalars(select(LibImage).where(LibImage.key == key, LibImage.dup_of.is_not(None))):
@@ -351,6 +354,8 @@ def scan_drive(s: Session, link: str) -> dict:
                 if f["mimeType"] == "application/vnd.google-apps.folder":
                     if f["name"].strip().lower() == "cutouts library":
                         set_setting(s, "cutouts_drive_folder", f["id"])
+                    if f["name"].strip().lower() == "product library":
+                        set_setting(s, "library_drive_folder", f["id"])
                     if f["name"].strip().lower() not in SKIP_FOLDERS:
                         stack.append((f["id"], f"{prefix}{f['name']}/"))
                 else:
@@ -442,8 +447,15 @@ def save_cutout(s: Session, img: LibImage, png: bytes) -> LibImage:
     return img
 
 
+def cutouts_on(s: Session) -> bool:
+    """Cut-outs are only needed for the composite engine. The default keeps original photos untouched."""
+    return bool(get_setting(s, "library_cutouts", False))
+
+
 def pending(s: Session, limit: int = 50) -> list[LibImage]:
     """Primary images of matched products that still need a cut-out (shoot-list products first)."""
+    if not cutouts_on(s):
+        return []
     order = {i["key"]: n for n, i in enumerate(get_setting(s, "shoot_list", []) or []) if i.get("key")}
     rows = list(s.scalars(select(LibImage).where(LibImage.primary == True, LibImage.cut_status == "pending",  # noqa: E712
                                                  LibImage.key != "", LibImage.dup_of.is_(None))))
@@ -459,6 +471,7 @@ def report(s: Session) -> dict:
     for i in imgs:
         by.setdefault(i.key, []).append(i)
     shoot = get_setting(s, "shoot_list", []) or []
+    cut = cutouts_on(s)
     keys = [i["key"] for i in shoot if i.get("key")] + sorted(k for k in by if k and k not in {i.get("key") for i in shoot})
     rows = []
     for item in shoot:
@@ -474,6 +487,8 @@ def report(s: Session) -> dict:
         sh = next((i for i in shoot if i.get("key") == k), None)
         if not live:
             status, notes = "needs_photo", "No photo found: add one to Raw input named with the product id"
+        elif not cut and prim and prim.cut_status != "skip":
+            status, notes = "ready", ""
         elif prim and prim.cut_status == "ok":
             status, notes = "ready", ""
         elif prim and prim.cut_status == "check":
@@ -496,7 +511,35 @@ def report(s: Session) -> dict:
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     return {"rows": rows, "unmatched": unmatched, "counts": counts, "products": len(prods),
-            "images": len([i for i in imgs if i.dup_of is None]), "shoot": len(shoot)}
+            "images": len([i for i in imgs if i.dup_of is None]), "shoot": len(shoot), "cutouts": cut}
+
+
+def refs_for(s: Session, key: str, limit: int = 3) -> list[str]:
+    """Best photos of one product (primary first, then the largest others) to give the AI several angles."""
+    live = [i for i in s.scalars(select(LibImage).where(LibImage.key == key, LibImage.dup_of.is_(None),
+                                                         LibImage.cut_status != "skip"))]
+    live.sort(key=lambda i: (not i.primary, -(i.w * i.h)))
+    return [i.path for i in live[:limit]]
+
+
+def save_original_to_drive(s: Session, img: LibImage, data: bytes):
+    """Keep the untouched original in Drive, grouped by product code: <Product library>/<code>/<code>_<n>.<ext>."""
+    folder = get_setting(s, "library_drive_folder", "") or get_setting(s, "cutouts_drive_folder", "")
+    if not folder or not img.key or img.dup_of:
+        return
+    try:
+        from .connectors import google
+        p = s.scalar(select(LibProduct).where(LibProduct.key == img.key))
+        code = storage.safe((p.product_id if p else img.key) or img.key)
+        sub = google.ensure_subfolder(folder, code)
+        ext = (re.search(r"\.(jpe?g|png|webp)$", img.src_name, re.I) or [None, "png"])[1].lower()
+        name = f"{code}_{img.id}.{ext}"
+        svc = google.drive()
+        q = f"'{sub}' in parents and name='{name}' and trashed=false"
+        if not svc.files().list(q=q, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute().get("files"):
+            google.upload(sub, name, data, "image/png" if ext == "png" else f"image/{'jpeg' if ext.startswith('jp') else ext}")
+    except Exception as e:
+        img.cut_note = f"Drive copy failed: {str(e)[:120]}"
 
 
 def _img(i: LibImage) -> dict:
@@ -531,6 +574,11 @@ def assign(s: Session, image_id: int, code: str) -> str:
         raise ValueError("Code not found in the master sheet")
     img.key = p.key
     pick_primary(s, p.key)
+    if not cutouts_on(s):
+        try:
+            save_original_to_drive(s, img, storage.read(img.path))
+        except Exception:
+            pass
     s.commit()
     return p.key
 
