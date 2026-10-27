@@ -114,6 +114,8 @@ def focus_index(s: Session, idx: dict | None = None) -> dict:
     """Only the products in the shoot sheet (when one is loaded and focus is on): the scan touches nothing else."""
     idx = idx if idx is not None else _index(s)
     keys = {i["key"] for i in (get_setting(s, "shoot_list", []) or []) if i.get("key")}
+    from .brands import queued_keys
+    keys |= queued_keys(s)
     if not keys or not get_setting(s, "library_focus", True):
         return idx
     return {k: p for k, p in idx.items() if p.key in keys}

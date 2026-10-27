@@ -1100,3 +1100,99 @@ def shopify_skip(body: PushIn, u=Depends(need("editor"))):
                 p.data = {**(p.data or {}), "shopify": {"status": "skipped"}}
         s.commit()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- brand workspace
+from . import brands as brandws  # noqa: E402
+
+
+@app.get("/brands/{key}")
+def brand_page(key: str, u=Depends(need("editor"))):
+    return FileResponse(config.WEB_DIR / "brand.html")
+
+
+@app.get("/api/brands")
+def brands_list(u=Depends(need("viewer"))):
+    with SessionLocal() as s:
+        return brandws.summary(s)
+
+
+@app.get("/api/brands/{key}")
+def brand_detail(key: str, q: str = "", u=Depends(need("viewer"))):
+    with SessionLocal() as s:
+        try:
+            return brandws.detail(s, key, q)
+        except KeyError:
+            raise HTTPException(404, "Brand not found")
+
+
+class KeysIn(BaseModel):
+    keys: list[str]
+
+
+class CodesIn(BaseModel):
+    codes: list[str]
+
+
+@app.put("/api/brands/{key}/queue")
+def brand_queue_set(key: str, body: KeysIn, u=Depends(need("editor"))):
+    """The brand queue in its new order (drag & drop add / remove / reorder)."""
+    with SessionLocal() as s:
+        if key not in brandws.brand_rows(s):
+            raise HTTPException(404, "Brand not found")
+        brandws.set_queue(s, key, body.keys)
+        s.commit()
+    return {"ok": True}
+
+
+@app.post("/api/brands/{key}/queue/add")
+def brand_queue_add(key: str, body: CodesIn, u=Depends(need("editor"))):
+    with SessionLocal() as s:
+        if key not in brandws.brand_rows(s):
+            raise HTTPException(404, "Brand not found")
+        r = brandws.add_codes(s, key, [c for c in body.codes if c.strip()])
+        log(s, u.email, f"Brand queue {key}: added {len(r['added'])}")
+        s.commit()
+        return r
+
+
+@app.put("/api/brands-order")
+def brands_order(body: KeysIn, u=Depends(need("editor"))):
+    """Which brand the studio works on first: keys in order, first = #1."""
+    with SessionLocal() as s:
+        brandws.set_rank(s, body.keys)
+        log(s, u.email, "Brand order: " + " > ".join(body.keys))
+        s.commit()
+    return {"ok": True}
+
+
+@app.post("/api/brands/{key}/send")
+def brand_send(key: str, u=Depends(need("editor"))):
+    """Send this brand's queue to the studio (key = 'all' sends every ranked brand in brand order)."""
+    with SessionLocal() as s:
+        r = brandws.send_to_studio(s, None if key == "all" else [key])
+        s.commit()
+    pipeline.STOP.clear()
+    return {"ok": True, **r}
+
+
+@app.post("/api/brands/{key}/logo")
+async def brand_logo(key: str, file: UploadFile = File(...), u=Depends(need("admin"))):
+    data = await file.read()
+    with SessionLocal() as s:
+        r = brandws.brand_rows(s).get(key)
+        if not r:
+            raise HTTPException(404, "Brand not found")
+        try:
+            from PIL import Image as _I
+            import io as _io
+            im = _I.open(_io.BytesIO(data)).convert("RGBA")
+            im.thumbnail((600, 600))
+            buf = _io.BytesIO()
+            im.save(buf, "PNG")
+        except Exception:
+            raise HTTPException(400, "Not an image")
+        rel = storage.save(f"style/brands/{storage.safe(key)}/logo.png", buf.getvalue())
+        r.data = {**(r.data or {}), "logo": rel}
+        s.commit()
+    return {"ok": True, "logo": img_url(rel)}

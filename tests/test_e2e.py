@@ -583,3 +583,38 @@ def test_shopify_queue_push_by_barcode_and_draft():
         assert c.get("/shopify").status_code == 200
     finally:
         shopify._call, shopify.httpx.post = orig_call, orig_post
+
+
+def test_brand_workspace_queue_and_order():
+    import io, openpyxl
+    c = client()
+    LIB = Path(__file__).parent / "library"
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "x/y"))])
+    wait_job(c)
+    tiles = {b["key"]: b for b in c.get("/api/brands").json()}
+    assert {"milan", "troika", "apli", "orom", "suckuk", "montmarte", "lamy"} <= set(tiles)
+    assert tiles["troika"]["in_master"] > 100 and tiles["milan"]["website"].startswith("https://www.milan.es")
+    d = c.get("/api/brands/troika?q=pencil").json()
+    assert d["available"] and all("PENCIL" in x["name"].upper() for x in d["available"])
+    r = c.post("/api/brands/troika/queue/add", json={"codes": ["TRV20/GY", "pen20-si", "NOPE-1"]}).json()
+    assert r["added"] == ["TRV20/GY", "PEN20/SI"] and r["unknown"] == ["NOPE-1"]
+    q = [x["key"] for x in c.get("/api/brands/troika").json()["queue"]]
+    c.put("/api/brands/troika/queue", json={"keys": q[::-1]})                     # drag & drop reorder
+    assert [x["code"] for x in c.get("/api/brands/troika").json()["queue"]] == ["PEN20/SI", "TRV20/GY"]
+    assert all(x["key"] not in q for x in c.get("/api/brands/troika").json()["available"])   # queued items leave the list
+    c.put("/api/brands-order", json={"keys": ["apli", "troika"]})                 # Apli #1, Troika #2
+    ranks = {b["key"]: b["rank"] for b in c.get("/api/brands").json()}
+    assert ranks["apli"] == 1 and ranks["troika"] == 2 and ranks["milan"] is None
+    c.post("/api/autopilot", json={"pipeline_mode": "v2"})
+    r = c.post("/api/brands/troika/send").json()
+    assert r["total"] == 2
+    st = c.get("/api/state").json()["queue"]
+    mine = [x for x in st if x["code"] in ("PEN20/SI", "TRV20/GY")]
+    assert [x["code"] for x in sorted(mine, key=lambda x: x["priority"])] == ["PEN20/SI", "TRV20/GY"]
+    assert all(2000 < x["priority"] < 3000 for x in mine)                         # brand #2 block
+    assert c.get("/brands/troika").status_code == 200
+    from app.db import SessionLocal
+    from app.library import focus_index
+    with SessionLocal() as s:
+        assert {p.key for p in focus_index(s).values()} >= {"PEN20SI", "TRV20GY"}   # Library scans brand-queue products
+    c.post("/api/autopilot", json={"pipeline_mode": "v1"})

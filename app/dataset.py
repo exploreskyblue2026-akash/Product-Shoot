@@ -58,13 +58,16 @@ def seed(s: Session, owner_email: str, owner_hash: str):
             "strength": DEFAULT_STRENGTH,
         }))
     # library rows: add any rows that are new in the shipped CSVs; never overwrite rows you edited in the tool
-    have = {(r.table, r.key) for r in s.scalars(select(LibraryRow))}
+    have = {(r.table, r.key): r for r in s.scalars(select(LibraryRow))}
     for table, keycol in LIB_TABLES.items():
         fname = "props_library.csv" if table == "props" else f"{table}.csv"
         with open(DATA_DIR / "dynamic" / fname, newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                if (table, row[keycol]) not in have:
+                cur = have.get((table, row[keycol]))
+                if cur is None:
                     s.add(LibraryRow(table=table, key=row[keycol], data=row))
+                elif any(k not in (cur.data or {}) for k in row):          # new fields only; your edits stay
+                    cur.data = {**row, **(cur.data or {})}
     # upgrade: 4-shot directions + website size in every rule version (your other rule edits are kept)
     new_dirs = _read_json("shot_directions.json")
     for rv in s.scalars(select(RuleVersion)):

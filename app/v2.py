@@ -66,6 +66,15 @@ def load_shoot_sheet(s: Session) -> dict:
     items = get_setting(s, "shoot_list", []) or []
     if not items:
         raise ValueError("No shoot sheet loaded. Add it on the Product Library page first.")
+    items = [{**it, "priority": n + 1} for n, it in enumerate(items)]
+    r = load_items(s, items)
+    log(s, "v2", f"Shoot sheet loaded: {r['added']} new, {r['updated']} updated, {r['waiting']} waiting, {r['missing']} not in master")
+    s.commit()
+    return r
+
+
+def load_items(s: Session, items: list[dict]) -> dict:
+    """Queue exactly these products (from the shoot sheet or a brand queue). item: key, code, shots, note, priority."""
     added = updated = waiting = missing = 0
     existing = {(p.data or {}).get("lib_key"): p for p in s.scalars(select(Product))
                 if (p.data or {}).get("v2") and p.stage not in ("saved", "rejected")}
@@ -89,10 +98,10 @@ def load_shoot_sheet(s: Session) -> dict:
             updated += 1
         text = " ".join(filter(None, [lp.name if lp else "", lp.category if lp else ""]))
         p.name = (lp.name if lp else it["code"])[:300]
-        p.brand_id = brand_for(s, f"{lp.brand if lp else ''} {text}")
+        p.brand_id = it.get("brand_key") or brand_for(s, f"{lp.brand if lp else ''} {text}")
         p.category_id = category_for(s, text)
         p.data = {**(p.data or {}), "v2": True, "lib_key": key or "", "shots": it.get("shots") or [],
-                  "note": it.get("note", ""), "priority": n + 1, "brand_label": lp.brand if lp else "",
+                  "note": it.get("note", ""), "priority": it.get("priority", n + 1), "brand_label": lp.brand if lp else "",
                   "cutout": img.cut_path if ready and engine == "composite" else "", "paused": False,
                   "engine": engine, "refs": refs_for(s, key) if (ready and key) else []}
         if not key:
@@ -106,8 +115,6 @@ def load_shoot_sheet(s: Session) -> dict:
             waiting += 1
         else:
             p.raw_path, p.stage, p.error = img.path, ("queue" if p.stage in ("needs_photo", "error", "queue", "") else p.stage), ""
-    s.commit()
-    log(s, "v2", f"Shoot sheet loaded: {added} new, {updated} updated, {waiting} waiting for photo/cut-out, {missing} not in master")
     s.commit()
     return {"added": added, "updated": updated, "waiting": waiting, "missing": missing, "total": len(items)}
 

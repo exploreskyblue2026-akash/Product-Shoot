@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..900&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="studio.css">
+<link rel="stylesheet" href="/studio.css">
 <style>
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body,system-ui,sans-serif);margin:0}
 .top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:0;z-index:5}
@@ -61,6 +61,23 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
 .gold img{width:100%;height:100%;object-fit:cover}
 .gold figure button{position:absolute;top:2px;right:2px;border:0;border-radius:4px;background:rgba(0,0,0,.6);color:#fff;cursor:pointer;font-size:12px;padding:1px 5px}
 .sw{display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid var(--line);vertical-align:middle;margin-right:2px}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+.tile{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden;text-decoration:none;color:var(--ink);transition:transform .12s,border-color .12s}
+.tile:hover,.tile:focus-visible{border-color:var(--azure);transform:translateY(-2px)}
+.logo{aspect-ratio:16/10;display:grid;place-items:center;background:var(--sunk);overflow:hidden}
+.logo img{max-width:80%;max-height:80%;object-fit:contain}
+.logo b{font-size:30px;font-weight:800;letter-spacing:.02em;color:var(--azure-text)}
+.tile .meta{padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+.tile .meta strong{font-size:15px}
+.tile .nums{display:flex;gap:6px;flex-wrap:wrap}
+.rank{position:absolute;top:8px;left:8px}
+.tile{position:relative}
+.order{display:flex;gap:8px;flex-wrap:wrap;min-height:44px;padding:8px;border:1px dashed var(--line);border-radius:10px}
+.order .pill{display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 12px;cursor:grab;font-size:13px;font-weight:600}
+.order .pill b{color:var(--azure-text)}
+.order .pill.dragging{opacity:.4}
+.order .pill button{border:0;background:none;cursor:pointer;color:var(--muted);font-size:14px;padding:0 0 0 4px}
 </style>
 </head>
 <body>
@@ -74,42 +91,40 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
 </header>
 <main>
   <section class="panel">
-    <div class="panel-h"><h2>Brand profiles</h2><button class="btn sm primary" id="add" type="button">+ Add brand</button></div>
-    <p class="hint" style="margin-top:0">Every image follows the <b>SkyBlue house style</b> first, then the product's brand profile. Brands without guidelines and unbranded products use the house style plus their category style. Add 2–3 <b>golden shots</b> (approved images you love) per brand: the AI copies their light and mood, never their objects.</p>
-    <div class="bgrid" id="brands"></div>
+    <div class="panel-h"><h2>Brand order for the studio</h2><button class="btn sm primary" id="send-all" type="button">Send all ranked brands to studio</button></div>
+    <p class="hint" style="margin-top:0">Drag to reorder. The studio shoots brand #1 first, then #2… within each brand it follows that brand's own queue. Add a brand here from its page ("Add to brand order").</p>
+    <div class="order" id="order" aria-label="Brand order"></div>
   </section>
   <section class="panel">
-    <div class="panel-h"><h2>Category styles</h2><span class="hint">used for unbranded products and brands without a profile</span></div>
-    <div class="bgrid" id="cats"></div>
+    <div class="panel-h"><h2>Brands</h2><button class="btn sm" id="add" type="button">+ Add brand</button></div>
+    <div class="tiles" id="tiles"></div>
   </section>
 </main>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script>
 const $=s=>document.querySelector(s), esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("on"),3000)}
-async function api(p,o={}){const r=await fetch(p,{credentials:"same-origin",...o,headers:o.body&&!(o.body instanceof FormData)?{"Content-Type":"application/json"}:{},body:o.body&&!(o.body instanceof FormData)?JSON.stringify(o.body):o.body});
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("on"),3200)}
+async function api(p,o={}){const fd=o.body instanceof FormData;const r=await fetch(p,{credentials:"same-origin",...o,headers:o.body&&!fd?{"Content-Type":"application/json"}:{},body:o.body&&!fd?JSON.stringify(o.body):o.body});
   if(r.status==401){location.href="/login";throw new Error("Signed out")} const j=await r.json().catch(()=>({})); if(!r.ok)throw new Error(j.detail||r.statusText); return j}
-const BF=[["brand_name","Brand name"],["detect_keywords","Detect words (|-separated)"],["positioning","Positioning / feel","ta"],["mood_override","Mood"],["hero_backdrop","Hero backdrop"],["palette_hex","Palette (hex, |-separated)"],["signature_props","Props allowed (|-separated)"],["human_allowed","People"],["brand_dos","Do's","ta"],["brand_donts","Don'ts","ta"]];
-const CF=[["name","Category"],["surfaces","Surfaces (|-separated)"],["use_scene","Use-case scene","ta"],["lifestyle_scene","Lifestyle scene","ta"],["default_moods","Moods (|-separated)"]];
-let D=null;
-function field(tb,key,[k,l,ta],v){const id=`${tb}-${key}-${k}`;return `<label class="field" for="${id}">${l}${ta?`<textarea id="${id}" data-k="${k}">${esc(v)}</textarea>`:`<input id="${id}" data-k="${k}" value="${esc(v)}">`}</label>`}
-function card(tb,r,F){const pal=(r.palette_hex||"").split("|").filter(Boolean).map(h=>`<span class="sw" style="background:${esc(h.trim())}"></span>`).join("");
-  return `<article class="bcard" data-tb="${tb}" data-key="${esc(r.key)}"><h3><span>${esc(r.key=="_default"?"SkyBlue house style":(r.brand_name||r.name||r.key))} ${pal}</span><span class="chip mute">${esc(r.status||r.group||"")}</span></h3>
-  <div class="two">${F.map(f=>field(tb,r.key,f,r[f[0]])).join("")}</div>
-  <div><div class="hint" style="margin-bottom:6px">Golden shots (max 3)</div><div class="gold">${(r.golden||[]).map((g,i)=>`<figure><img src="${esc(g)}" alt="Golden shot ${i+1}"><button type="button" data-del="${i}" aria-label="Remove">✕</button></figure>`).join("")}
-    <label class="btn sm">+ Add<input type="file" accept="image/*" multiple hidden data-up></label></div></div>
-  <div class="acts"><button class="btn sm primary" type="button" data-save>Save</button></div></article>`}
-async function load(){D=await api("/api/style");
-  const b=[...D.brands].sort((x,y)=>(x.key=="_default"?-1:y.key=="_default"?1:x.key.localeCompare(y.key)));
-  $("#brands").innerHTML=b.map(r=>card("brands",r,BF)).join("");$("#cats").innerHTML=D.categories.map(r=>card("categories",r,CF)).join("")}
-document.addEventListener("click",async e=>{const c=e.target.closest(".bcard");
-  if(e.target.closest("[data-save]")&&c){const row={};c.querySelectorAll("[data-k]").forEach(i=>row[i.dataset.k]=i.value);
-    try{await api(`/api/admin/library/${c.dataset.tb}/${encodeURIComponent(c.dataset.key)}`,{method:"PUT",body:row});toast("Saved")}catch(x){toast(x.message)}}
-  const d=e.target.closest("[data-del]");if(d&&c){try{await api(`/api/style/${c.dataset.tb}/${encodeURIComponent(c.dataset.key)}/golden/${d.dataset.del}`,{method:"DELETE"});await load()}catch(x){toast(x.message)}}});
-document.addEventListener("change",async e=>{if(!e.target.matches("[data-up]"))return;const c=e.target.closest(".bcard"),fd=new FormData();[...e.target.files].forEach(f=>fd.append("files",f,f.name));
-  try{await api(`/api/style/${c.dataset.tb}/${encodeURIComponent(c.dataset.key)}/golden`,{method:"POST",body:fd});toast("Golden shot added");await load()}catch(x){toast(x.message)}});
-$("#add").onclick=async()=>{const name=prompt("Brand name (as written on the product / in the master sheet tab)");if(!name)return;
-  const key=name.toLowerCase().replace(/[^a-z0-9]+/g,"");try{await api(`/api/admin/library/brands/${key}`,{method:"PUT",body:{brand_name:name,detect_keywords:name.toLowerCase(),status:"added in tool"}});await load();toast("Brand added")}catch(x){toast(x.message)}};
+function initials(n){return (n||"?").replace(/\(.*?\)/g,"").replace(/[^A-Za-z0-9 ]/g," ").trim().split(/\s+/).map(w=>w[0]).join("").slice(0,3).toUpperCase()||"?"}
+let B=[];
+async function load(){B=await api("/api/brands");
+  const ranked=B.filter(b=>b.rank!=null).sort((a,b)=>a.rank-b.rank);
+  $("#order").innerHTML=ranked.map((b,i)=>`<span class="pill" draggable="true" data-key="${esc(b.key)}"><b>#${i+1}</b>${esc(b.name)} <span class="hint">${b.queue} queued</span><button type="button" data-unrank="${esc(b.key)}" aria-label="Remove ${esc(b.name)} from the order">✕</button></span>`).join("")||'<span class="hint">No brand ranked yet.</span>';
+  $("#tiles").innerHTML=B.map(b=>`<a class="tile" href="/brands/${encodeURIComponent(b.key)}">${b.rank!=null?`<span class="chip info rank">#${b.rank}</span>`:""}
+    <div class="logo">${b.logo?`<img src="${esc(b.logo)}" alt="${esc(b.name)} logo">`:`<b>${esc(initials(b.name))}</b>`}</div>
+    <div class="meta"><strong>${esc(b.name)}</strong><span class="hint">${esc(b.origin||(b.key=="_default"?"Base style for every image":"—"))}</span>
+    <div class="nums">${b.key=="_default"?"":`<span class="chip mute">${b.in_master} in master${b.estimate?` · ~${esc(b.estimate)}`:""}</span><span class="chip ${b.queue?"info":"mute"}">${b.queue} in queue</span>`}</div></div></a>`).join("")}
+async function saveOrder(keys){await api("/api/brands-order",{method:"PUT",body:{keys}});await load()}
+(()=>{const box=$("#order");let drag=null;
+  box.addEventListener("dragstart",e=>{drag=e.target.closest(".pill");drag&&drag.classList.add("dragging")});
+  box.addEventListener("dragover",e=>{if(!drag)return;e.preventDefault();const o=e.target.closest(".pill");if(!o||o===drag)return;const r=o.getBoundingClientRect();box.insertBefore(drag,(e.clientX-r.left)>r.width/2?o.nextSibling:o)});
+  box.addEventListener("dragend",async()=>{if(!drag)return;drag.classList.remove("dragging");drag=null;try{await saveOrder([...box.querySelectorAll(".pill")].map(p=>p.dataset.key));toast("Brand order saved")}catch(x){toast(x.message)}});})();
+document.addEventListener("click",async e=>{const u=e.target.closest("[data-unrank]");if(u){e.preventDefault();await saveOrder(B.filter(b=>b.rank!=null&&b.key!=u.dataset.unrank).sort((a,b)=>a.rank-b.rank).map(b=>b.key));}});
+$("#send-all").onclick=async()=>{try{const r=await api("/api/brands/all/send",{method:"POST"});toast(`${r.total} products sent: ${r.total-r.waiting-r.missing} ready, ${r.waiting} waiting for photos`)}catch(x){toast(x.message)}};
+$("#add").onclick=async()=>{const name=prompt("Brand name (as on the product / master sheet tab)");if(!name)return;const key=name.toLowerCase().replace(/[^a-z0-9]+/g,"");
+  const origin=prompt("Origin, e.g. 'Indian' or 'Imported · Japan'","Indian")||"";const website=prompt("Website (optional)","")||"";
+  try{await api(`/api/admin/library/brands/${key}`,{method:"PUT",body:{brand_name:name,detect_keywords:name.toLowerCase(),origin,website,status:"added in tool"}});location.href="/brands/"+key}catch(x){toast(x.message)}};
 load().catch(e=>toast(e.message));
 </script>
 </body>
