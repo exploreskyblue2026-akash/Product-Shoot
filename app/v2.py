@@ -76,7 +76,8 @@ def load_shoot_sheet(s: Session) -> dict:
         from .library import cutouts_on, refs_for
         engine = "composite" if cutouts_on(s) else "ai"
         if engine == "ai":
-            ready = bool(img and img.cut_status != "skip")
+            q = (img.meta or {}) if img else {}
+            ready = bool(img and img.cut_status != "skip" and (not q.get("flags") or q.get("override")))
         else:
             ready = bool(img and img.cut_path and img.cut_status in ("ok", "check"))
         p = existing.get(key) if key else None
@@ -98,7 +99,9 @@ def load_shoot_sheet(s: Session) -> dict:
             p.stage, p.error = "error", f"{it['code']} is not in the master sheet"
             missing += 1
         elif not ready:
-            p.stage, p.error = "needs_photo", ("Waiting for its cut-out on the Library page" if img and engine == "composite"
+            p.stage, p.error = "needs_photo", ("Photo " + " and ".join((img.meta or {}).get("flags", [])) + ": add a better one or press 'Use anyway' in the Library"
+                                               if img and engine == "ai" and (img.meta or {}).get("flags") else
+                                               "Waiting for its cut-out on the Library page" if img and engine == "composite"
                                                else "No photo in the Library for this code")
             waiting += 1
         else:

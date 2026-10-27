@@ -130,6 +130,23 @@ def process(pid: int, only: list[int] | None = None):
             from .v2 import requested_shots
             defaults = requested_shots(s, p)
         style = style_reference(s, p)
+        angle_raw = {}
+        if (p.data or {}).get("lib_key"):
+            from . import library as lib
+            key = p.data["lib_key"]
+            lp = s.scalar(select(lib.LibProduct).where(lib.LibProduct.key == key))
+            if lp is not None and not ((lp.data or {}).get("memory") or {}).get("facts"):
+                try:                                       # study once (≈ ₹0.3), reused for every future shoot
+                    lib.study_product(s, key, prov)
+                    _charge(s, p, "memory", config.model_name(config.MODEL_VISION), config.COST_VISION * 2)
+                except Exception as e:
+                    print(f"[pipeline] product study failed for {p.code}: {e}")
+            if lp is not None:
+                p.data = {**(p.data or {}), "memory": (lp.data or {}).get("memory") or {}}
+            s.commit()
+            for r in lib.refs_with_angles(s, key, 4):
+                angle_raw.setdefault(r["angle"] or "unknown", r["path"])
+            prompts = {x["no"]: x for x in build_prompts(s, p, p.analysis or {}, rv, notes)}   # now with product facts
         refs = []
         for rel in ((p.data or {}).get("refs") or [])[1:]:   # extra angles of the same product from the Library
             try:
@@ -145,6 +162,21 @@ def process(pid: int, only: list[int] | None = None):
             sh.status, sh.prompt, sh.model, sh.rule_version, sh.qc = "gen", spec["prompt"], model, rv.version, {}
             s.commit()
             prompt = spec["prompt"]
+            shot_raw = raw
+            if angle_raw:
+                want = {"hero": ("front", "angle"), "detail": ("detail", "front"), "use_case": ("angle", "side", "in_use", "front"),
+                        "lifestyle": ("angle", "side", "front")}.get(sh.kind, ("front",))
+                rel = next((angle_raw[a] for a in want if a in angle_raw), None)
+                if rel:
+                    try:
+                        shot_raw = storage.read(rel)
+                    except Exception:
+                        shot_raw = raw
+            facts = ""
+            mem = (p.data or {}).get("memory") or {}
+            if mem.get("facts"):
+                from .dataset import memory_block
+                facts = memory_block(mem).split("\n", 1)[-1].replace("\n", "; ")
             result = None
             for attempt in range(retries + 1):
                 if STOP.is_set():
@@ -155,13 +187,13 @@ def process(pid: int, only: list[int] | None = None):
                     stop_reason = f"Stopped at the ${cap:.2f} per-product cost limit"
                     break
                 sh.attempts = (sh.attempts or 0) + 1
-                img = storage.to_output(prov.generate(prompt, raw, model, size, refs=refs, style=style))
+                img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=refs, style=style))
                 used = getattr(prov, "last_model", None) or model     # may differ after a fallback
                 sh.model = used
                 _charge(s, p, "image", used, config.image_cost(used, size), sh)
                 rel = storage.save(f"shots/{storage.safe(p.code)}/{no}-{sh.kind}-a{sh.attempts}.jpg", img)
                 try:
-                    result = prov.qc(raw, img, {"kind": sh.kind, "no": no}, rv.data)
+                    result = prov.qc(shot_raw, img, {"kind": sh.kind, "no": no, "facts": facts}, rv.data)
                     _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
                 except Exception as e:                   # keep the image; a person checks it instead
                     print(f"[pipeline] QC failed for {p.code} shot {no}: {e}")
@@ -173,6 +205,9 @@ def process(pid: int, only: list[int] | None = None):
                     break
                 failed = [f"{k}: {result['reasons'].get(k, 'failed')}" for k, v in result["checks"].items()
                           if not v and (qc_mode != "light" or k in CRITICAL)]
+                if (p.data or {}).get("lib_key"):
+                    from .library import learn_from_fail
+                    learn_from_fail(s, p.data["lib_key"], [f"{sh.kind}: {r}" for r in failed])
                 prompt = spec["prompt"] + "\n\n[CORRECTION — previous attempt failed QC]\nFix: " + "; ".join(failed)
             if result is None:
                 sh.status = "wait"

@@ -163,6 +163,42 @@ def import_shoot(s: Session, data: bytes, filename: str = "shoot.xlsx") -> dict:
 
 
 # ------------------------------------------------------------------ images
+SHARP_MIN = 80
+
+
+def sharpness(im: Image.Image) -> int:
+    """How crisp the product's edges are (0-255): the 90th percentile of edge strength over edge pixels only,
+    so plain backgrounds don't count. Sharp photos score ~150-255, blurred ones < 60. 255 = can't judge."""
+    from PIL import ImageFilter
+    g = im.convert("L")
+    g.thumbnail((800, 800))
+    if min(g.size) < 10:
+        return 0
+    e = g.filter(ImageFilter.FIND_EDGES).crop((3, 3, g.width - 3, g.height - 3))
+    hist = e.histogram()
+    edge = hist[12:]
+    n = sum(edge)
+    if n < max(50, e.width * e.height * 0.0005):
+        return 255                                   # almost no edges: nothing to judge
+    acc = 0
+    for v in range(255, 11, -1):
+        acc += hist[v]
+        if acc >= n * 0.10:
+            return v
+    return 12
+
+
+def photo_quality(im: Image.Image, s: Session | None = None) -> dict:
+    min_px = int(get_setting(s, "min_raw_px", 1000) or 1000) if s is not None else 1000
+    sh = sharpness(im)
+    flags = []
+    if max(im.size) < min_px:
+        flags.append(f"too small ({im.size[0]}×{im.size[1]}, need {min_px}px+)")
+    if sh < SHARP_MIN:
+        flags.append("blurry")
+    return {"sharpness": sh, "flags": flags}
+
+
 def dhash(im: Image.Image) -> str:
     g = im.convert("L").resize((9, 8), Image.LANCZOS)
     px = list(g.getdata())
@@ -215,10 +251,11 @@ def add_image(s: Session, data: bytes, name: str, source: str = "file", key: str
         p = key_from_name(name, idx)
         key = p.key if p else ""
     h = dhash(im)
+    q = photo_quality(im, s)
     rel = storage.save(f"library/raw/{storage.safe(key or 'unmatched')}/{storage.safe(name)[-120:]}",
                        storage.normalise_raw(data))
     img = LibImage(key=key, source=source, src_name=name[:300], drive_id=drive_id, path=rel,
-                   w=im.size[0], h=im.size[1], phash=h)
+                   w=im.size[0], h=im.size[1], phash=h, meta=q)
     for other in s.scalars(select(LibImage).where(LibImage.key == key, LibImage.dup_of.is_(None))):
         if _ham(other.phash, h) <= 5:                    # same picture (even resized / re-saved)
             if img.w * img.h > other.w * other.h:        # keep the bigger one as the original
@@ -247,7 +284,8 @@ def pick_primary(s: Session, key: str, force_id: int | None = None):
     best = next((i for i in imgs if i.id == force_id), None)
     if best is None:
         usable = [i for i in imgs if i.cut_status != "skip"] or imgs
-        best = cur if cur and cur.cut_status in ("ok", "check") else max(usable, key=lambda i: i.w * i.h)
+        good = [i for i in usable if not (i.meta or {}).get("flags")] or usable
+        best = cur if cur and cur.cut_status in ("ok", "check") else max(good, key=lambda i: (i.w * i.h) * (2 if (i.meta or {}).get("angle") == "front" else 1))
     for i in imgs:
         i.primary = i is best
     for i in s.scalars(select(LibImage).where(LibImage.key == key, LibImage.dup_of.is_not(None))):
@@ -518,6 +556,8 @@ def report(s: Session) -> dict:
         sh = next((i for i in shoot if i.get("key") == k), None)
         if not live:
             status, notes = "needs_photo", "No photo found: add one to Raw input named with the product id"
+        elif not cut and prim and prim.cut_status != "skip" and (prim.meta or {}).get("flags") and not (prim.meta or {}).get("override"):
+            status, notes = "low_quality", "Photo " + " and ".join(prim.meta["flags"]) + ". Add a better photo or press 'Use anyway'"
         elif not cut and prim and prim.cut_status != "skip":
             status, notes = "ready", ""
         elif prim and prim.cut_status == "ok":
@@ -528,21 +568,84 @@ def report(s: Session) -> dict:
             status, notes = "skipped", "Skipped by you"
         else:
             status, notes = "cutting", "Waiting for cut-out (keep the Library page open)"
-        if prim and max(prim.w, prim.h) < LOW_RES and "low resolution" not in notes:
+        if cut and prim and max(prim.w, prim.h) < LOW_RES and "low resolution" not in notes:
             notes = (notes + "; " if notes else "") + f"low resolution ({prim.w}×{prim.h})"
+        mem = ((p.data or {}).get("memory") if p else None) or {}
         rows.append({"code": (p.product_id or k) if p else k, "key": k, "name": p.name if p else "",
                      "brand": p.brand if p else "", "category": p.category if p else "", "in_shoot": bool(sh),
                      "status": status, "images": len(live), "dups": len(lst) - len(live),
                      "primary": _img(prim) if prim else None, "notes": notes,
                      "shots": (sh or {}).get("shots", []), "note": (sh or {}).get("note", ""),
                      "priority": (sh or {}).get("priority"), "match": (sh or {}).get("match", ""),
-                     "all": [_img(i) for i in live]})
+                     "all": [_img(i) for i in live], "memory": mem})
     unmatched = [_img(i) for i in by.get("", []) if i.dup_of is None]
     counts = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     return {"rows": rows, "unmatched": unmatched, "counts": counts, "products": len(prods),
             "images": len([i for i in imgs if i.dup_of is None]), "shoot": len(shoot), "cutouts": cut}
+
+
+def refs_with_angles(s: Session, key: str, limit: int = 4) -> list[dict]:
+    live = [i for i in s.scalars(select(LibImage).where(LibImage.key == key, LibImage.dup_of.is_(None),
+                                                         LibImage.cut_status != "skip"))]
+    live.sort(key=lambda i: (not i.primary, bool((i.meta or {}).get("flags")), -(i.w * i.h)))
+    return [{"path": i.path, "angle": (i.meta or {}).get("angle", ""), "id": i.id} for i in live[:limit]]
+
+
+MEMORY_SCHEMA = {
+    "summary": "one sentence: what the product is",
+    "text": ["every piece of printed text / logo exactly as written, e.g. 'TROIKA'"],
+    "colours": ["main colours as names + hex"],
+    "shape": "shape and proportions, e.g. slim hexagonal pen, length about 10x width",
+    "parts": ["visible parts with counts, e.g. 1 metal clip, silver tip, stylus cap"],
+    "material": "materials and finish (matte, glossy, brushed metal, fabric...)",
+    "size": "real size if known or estimable, e.g. about 10 cm long",
+    "must_keep": ["the details an image generator must never change"],
+    "watch": ["details image generators often get wrong for this product"],
+    "angles": ["for EACH photo in order, one of: front | side | angle | top | back | detail | packaging | in_use"],
+    "has_brand_mark": "true if any brand name/logo is visible on the product itself, else false",
+}
+
+
+def study_product(s: Session, key: str, prov) -> dict:
+    """Study all photos of one product once; store the memory (facts + angle of every photo)."""
+    p = s.scalar(select(LibProduct).where(LibProduct.key == key))
+    if not p:
+        raise ValueError("Unknown product")
+    refs = refs_with_angles(s, key, 4)
+    if not refs:
+        raise ValueError("No photos for this product")
+    imgs = [storage.read(r["path"]) for r in refs]
+    facts = prov.study(imgs, {"name": p.name, "brand": p.brand, "category": p.category, "code": p.product_id,
+                              "schema": MEMORY_SCHEMA})
+    angles = facts.pop("angles", []) or []
+    for r, a in zip(refs, angles):
+        img = s.get(LibImage, r["id"])
+        if img:
+            img.meta = {**(img.meta or {}), "angle": str(a).lower().strip()}
+    old = (p.data or {}).get("memory") or {}
+    watch = list(dict.fromkeys((old.get("facts") or {}).get("watch", []) + (facts.get("watch") or [])))[:8]
+    facts["watch"] = watch
+    mem = {"facts": facts, "approved": False, "auto": True, "photos": len(refs)}
+    p.data = {**(p.data or {}), "memory": mem}
+    pick_primary(s, key)
+    import json
+    storage.save(f"memory/{storage.safe(p.product_id or key)}.json", json.dumps(mem, ensure_ascii=False, indent=1).encode())
+    s.commit()
+    return mem
+
+
+def learn_from_fail(s: Session, key: str, reasons: list[str]):
+    """A QC fail becomes a 'watch out' note in the product memory, so the next run avoids it."""
+    p = s.scalar(select(LibProduct).where(LibProduct.key == key))
+    if not p or not reasons:
+        return
+    mem = dict((p.data or {}).get("memory") or {})
+    facts = dict(mem.get("facts") or {})
+    facts["watch"] = list(dict.fromkeys((facts.get("watch") or []) + [r[:140] for r in reasons]))[-8:]
+    mem["facts"] = facts
+    p.data = {**(p.data or {}), "memory": mem}
 
 
 def refs_for(s: Session, key: str, limit: int = 3) -> list[str]:
@@ -576,7 +679,8 @@ def save_original_to_drive(s: Session, img: LibImage, data: bytes):
 def _img(i: LibImage) -> dict:
     return {"id": i.id, "src": f"/files/{i.path}", "cut": f"/files/{i.cut_path}" if i.cut_path else "",
             "w": i.w, "h": i.h, "status": i.cut_status, "note": i.cut_note, "name": i.src_name,
-            "source": i.source, "primary": i.primary}
+            "source": i.source, "primary": i.primary, "angle": (i.meta or {}).get("angle", ""),
+            "flags": (i.meta or {}).get("flags", []), "sharpness": (i.meta or {}).get("sharpness")}
 
 
 def report_csv(s: Session) -> str:

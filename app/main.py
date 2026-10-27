@@ -823,6 +823,8 @@ def library_image(iid: int, body: ImgAct, u=Depends(need("editor"))):
             except ValueError as e:
                 raise HTTPException(400, str(e))
             log(s, u.email, f"Library: image {iid} assigned to {key}")
+        elif body.action == "use_anyway":
+            img.meta = {**(img.meta or {}), "override": True}
         elif body.action == "discard":
             img.key, img.cut_status, img.primary = "", "skip", False
             img.dup_of = img.dup_of or -1          # hidden from the tray
@@ -970,3 +972,70 @@ def style_list(u=Depends(need("viewer"))):
 @app.get("/brands")
 def brands_page(u=Depends(need("editor"))):
     return FileResponse(config.WEB_DIR / "brands.html")
+
+
+
+# ---------------------------------------------------------------- product memory
+@app.post("/api/library/products/{key}/study")
+def study_one(key: str, u=Depends(need("editor"))):
+    from .providers import get_provider
+
+    def run(s):
+        library.study_product(s, key, get_provider())
+        s.add(Usage(product_id=None, kind="memory", model=config.model_name(config.MODEL_VISION), cost=config.COST_VISION * 2))
+        s.commit()
+        return "memory ready"
+    _bg(f"Studying {key}", run)
+    return {"ok": True}
+
+
+@app.post("/api/library/study-shoot")
+def study_shoot(u=Depends(need("editor"))):
+    """Study every shoot-sheet product that has photos but no memory yet (≈ ₹0.3 each, once)."""
+    from .providers import get_provider
+    from .db import LibProduct as _LP
+
+    def run(s):
+        prov, done = get_provider(), 0
+        for it in get_setting(s, "shoot_list", []) or []:
+            k = it.get("key")
+            lp = s.scalar(select(_LP).where(_LP.key == k)) if k else None
+            if not lp or ((lp.data or {}).get("memory") or {}).get("facts"):
+                continue
+            try:
+                library.study_product(s, k, prov)
+                s.add(Usage(product_id=None, kind="memory", model=config.model_name(config.MODEL_VISION), cost=config.COST_VISION * 2))
+                s.commit()
+                done += 1
+            except ValueError:
+                continue
+        return f"{done} products studied"
+    _bg("Studying shoot-sheet products", run)
+    return {"ok": True}
+
+
+class MemoryIn(BaseModel):
+    facts: dict | None = None
+    approved: bool | None = None
+
+
+@app.put("/api/library/products/{key}/memory")
+def memory_put(key: str, body: MemoryIn, u=Depends(need("editor"))):
+    from .db import LibProduct as _LP
+    with SessionLocal() as s:
+        lp = s.scalar(select(_LP).where(_LP.key == key))
+        if not lp:
+            raise HTTPException(404, "Unknown product")
+        mem = dict((lp.data or {}).get("memory") or {})
+        if body.facts is not None:
+            mem["facts"] = {**(mem.get("facts") or {}), **body.facts}
+            mem["edited_by"] = u.email
+        if body.approved is not None:
+            mem["approved"] = body.approved
+            mem["approved_by"] = u.email if body.approved else ""
+        lp.data = {**(lp.data or {}), "memory": mem}
+        import json as _json
+        storage.save(f"memory/{storage.safe(lp.product_id or key)}.json", _json.dumps(mem, ensure_ascii=False, indent=1).encode())
+        log(s, u.email, f"Product memory {'approved' if mem.get('approved') else 'edited'}: {lp.product_id or key}")
+        s.commit()
+        return {"ok": True, "memory": mem}

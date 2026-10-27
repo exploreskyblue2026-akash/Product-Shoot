@@ -54,3 +54,14 @@ def _scene(self, prompt: str, model: str, size: str = "1K") -> bytes:
 
 
 MockProvider.generate_scene = _scene
+
+
+
+def _study(self, images: list, ctx: dict) -> dict:
+    angles = ["front", "side", "detail", "top"][:len(images)]
+    return {"summary": f"{ctx.get('name')} (mock study)", "text": [str(ctx.get("brand") or "")], "colours": ["as photographed"],
+            "shape": "as photographed", "parts": [], "material": "", "size": "", "must_keep": ["logo", "colour"],
+            "watch": [], "angles": angles, "has_brand_mark": bool(ctx.get("brand"))}
+
+
+MockProvider.study = _study

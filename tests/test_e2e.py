@@ -468,3 +468,68 @@ def test_brand_layer_house_style_unbranded_and_golden():
         assert "UNBRANDED" not in build_prompts(s, t, {}, live_rules(s))[0]["prompt"]
         assert pl.style_reference(s, t) is not None
         s.rollback()
+
+
+def test_product_memory_quality_gate_and_learning():
+    import io, time, openpyxl
+    from PIL import Image, ImageDraw, ImageFilter
+    from app.providers import mock
+    c = client()
+    c.post("/api/library/clear")
+    c.put("/api/admin/settings", json={"library_cutouts": False, "max_cost_product": 5, "daily_budget": 100,
+                                       "default_shots": [1, 2], "hero_gate": False, "retries": 0, "qc_mode": "light"})
+    LIB = Path(__file__).parent / "library"
+    def photo(color, size=1400, blur=0):
+        im = Image.new("RGB", (size, size), (250, 250, 250))
+        ImageDraw.Draw(im).rectangle([size // 3, size // 5, size * 2 // 3, size * 4 // 5], fill=color)
+        if blur:
+            im = im.filter(ImageFilter.GaussianBlur(blur))
+        b = io.BytesIO(); im.save(b, "JPEG"); return b.getvalue()
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["SHOOT", "SHOTS"]); ws.append(["PIP25/BL", "1,2"]); ws.append(["PIP25/YE", "1"])
+    b = io.BytesIO(); wb.save(b)
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "x/y")),
+                                         ("files", ("mem_shoot.xlsx", b.getvalue(), "x/y")),
+                                         ("files", ("PIP25-BL front.jpg", photo((20, 60, 200)), "image/jpeg")),
+                                         ("files", ("PIP25-YE.jpg", photo((240, 200, 0), 600, blur=4), "image/jpeg"))])
+    for _ in range(100):
+        st = c.get("/api/library").json()
+        if not st["job"]["running"]:
+            break
+        time.sleep(0.1)
+    rows = {r["code"]: r for r in st["rows"]}
+    assert rows["PIP25/BL"]["status"] == "ready"
+    assert rows["PIP25/YE"]["status"] == "low_quality" and "blurry" in rows["PIP25/YE"]["notes"]
+    # study + edit + approve memory
+    c.post("/api/library/study-shoot")
+    for _ in range(100):
+        st = c.get("/api/library").json()
+        if not st["job"]["running"]:
+            break
+        time.sleep(0.1)
+    bl = {r["code"]: r for r in st["rows"]}["PIP25/BL"]
+    assert bl["memory"]["facts"]["summary"] and bl["primary"]["angle"] == "front"
+    m = c.put(f"/api/library/products/{bl['key']}/memory", json={"facts": {"text": ["TROIKA", "LILIPUT"]}, "approved": True}).json()
+    assert m["memory"]["approved"] and m["memory"]["facts"]["text"] == ["TROIKA", "LILIPUT"]
+    # generation: facts reach the prompt; a QC fail is learned
+    seen = []
+    og, oq = mock.MockProvider.generate, mock.MockProvider.qc
+    def gen(self, prompt, raw, model, size="1K", refs=None, style=None):
+        seen.append(prompt); return og(self, prompt, raw, model, size)
+    def qc(self, raw, img, shot, rules):
+        assert "TROIKA" in shot["facts"]
+        return {"checks": {"label_text": shot["no"] != 2, "shape_match": True, "no_artifacts": True},
+                "reasons": {"label_text": "logo misspelt as TROlKA"}}
+    mock.MockProvider.generate, mock.MockProvider.qc = gen, qc
+    try:
+        c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": True, "auto_approve": False})
+        r = c.post("/api/v2/load-shoot").json()
+        assert r["waiting"] == 1                                   # the blurry one is held back, nothing spent
+        while pipeline.tick():
+            pass
+    finally:
+        mock.MockProvider.generate, mock.MockProvider.qc = og, oq
+        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+    assert seen and "PRODUCT FACTS" in seen[0] and "TROIKA" in seen[0]
+    watch = {r["code"]: r for r in c.get("/api/library").json()["rows"]}["PIP25/BL"]["memory"]["facts"]["watch"]
+    assert any("TROlKA" in w for w in watch)

@@ -168,6 +168,18 @@ class GeminiProvider:
         reason = getattr(r.candidates[0], "finish_reason", "no image") if r.candidates else "no candidates"
         raise RuntimeError(f"Model returned no image ({reason})")
 
+    def study(self, images: list[bytes], ctx: dict) -> dict:
+        """Product memory: study every photo of one product once and return exact facts as JSON."""
+        prompt = (
+            f"You are a meticulous product cataloguer for an e-commerce studio. The {len(images)} photos above all show the "
+            f"SAME product: '{ctx.get('name')}' (brand: {ctx.get('brand') or 'unknown'}, category: {ctx.get('category')}, "
+            f"code: {ctx.get('code')}). Describe it so an image generator can reproduce it EXACTLY. Transcribe printed "
+            "text letter by letter; only include what you can actually see. Return ONLY JSON with these keys:\n"
+            + json.dumps(ctx["schema"]))
+        parts = [types.Part.from_bytes(data=b, mime_type=_mime(b)) for b in images[:4]]
+        r = self._vision(parts + [prompt + "\nReply with JSON only."], temperature=0)
+        return _json(r.text)
+
     def qc(self, raw: bytes, gen: bytes, shot: dict, rules: dict) -> dict:
         prompt = (
             "You are a strict QC reviewer for e-commerce product photos. Image 1 is the real product, image 2 is the generated "
@@ -179,6 +191,10 @@ class GeminiProvider:
             "attention_70_30: product is the clear focal point. props_ok: at most 5 props, none branded, realistic scale. "
             "no_artifacts: no extra text, watermark, warped hands or geometry. margin_ok: product not cropped, clear margin."
         )
+        if shot.get("facts"):
+            prompt += ("\nVerify against these known PRODUCT FACTS (from the real product): " + shot["facts"] +
+                       "\nlabel_text fails if any listed text is misspelt, missing or extra text was invented. "
+                       "shape_match fails if any listed part or count is wrong. colour_match fails on a different colour.")
         r = self._vision([types.Part.from_bytes(data=raw, mime_type=_mime(raw)),
                           types.Part.from_bytes(data=gen, mime_type=_mime(gen)), prompt + "\nReply with JSON only."],
                          temperature=0)

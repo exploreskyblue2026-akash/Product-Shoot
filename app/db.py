@@ -172,6 +172,7 @@ class LibImage(Base):
     cut_path: Mapped[str] = mapped_column(String(500), default="")
     cut_status: Mapped[str] = mapped_column(String(20), default="pending")   # pending | ok | check | skip
     cut_note: Mapped[str] = mapped_column(String(300), default="")
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)                  # angle, sharpness, quality flags
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -197,6 +198,22 @@ class FileMirror(Base):
 
 def init_db():
     Base.metadata.create_all(engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns():
+    """Tiny auto-migration: new columns added in an update are created in an existing database (SQLite or Postgres)."""
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    with engine.begin() as con:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in have:
+                    ddl = col.type.compile(dialect=engine.dialect)
+                    con.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl}'))
 
 
 def get_setting(s: Session, key: str, default=None):
