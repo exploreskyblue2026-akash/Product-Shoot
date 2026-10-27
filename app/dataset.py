@@ -13,6 +13,8 @@ DEFAULT_STRENGTH = {"lighting": "strict", "attention": "normal", "size": "normal
                     "props": "normal", "negative_space": "relaxed"}
 
 DEFAULT_SETTINGS = {
+    "library_focus": False,        # False: scan everything in Raw input; True: only shoot-sheet / brand-queue codes
+    "library_autoscan": True,      # re-scan the saved Drive link every 30 min (new files only)
     "library_cutouts": False,      # False: keep original photos (AI generation). True: cut-outs + composite engine
     "pipeline_mode": "v2",         # v2 = shoot-sheet flow (the only flow on screen); v1 = old 'add input' flow. v1: AI draws product + scene · v2: real cut-out + AI scene, shoot sheet only
     "scene_strategy": "auto",      # v2 scenes: auto | mix | pool | fresh

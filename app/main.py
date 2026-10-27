@@ -578,7 +578,7 @@ def test_conn(what: str, u=Depends(need("admin"))):
     raise HTTPException(404)
 
 
-SETTING_KEYS = ["library_focus", "library_drive_copy", "library_cutouts", "pipeline_mode", "scene_strategy", "scene_reuse", "fresh_brands", "auto_approve", "retries", "publish_shopify", "budget_month", "budget_action", "model_hero_detail",
+SETTING_KEYS = ["library_autoscan", "library_focus", "library_drive_copy", "library_cutouts", "pipeline_mode", "scene_strategy", "scene_reuse", "fresh_brands", "auto_approve", "retries", "publish_shopify", "budget_month", "budget_action", "model_hero_detail",
                 "model_other", "file_naming", "min_raw_px", "output_drive_folder", "cost_mode", "default_shots",
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr"]
 
@@ -1196,3 +1196,29 @@ async def brand_logo(key: str, file: UploadFile = File(...), u=Depends(need("adm
         r.data = {**(r.data or {}), "logo": rel}
         s.commit()
     return {"ok": True, "logo": img_url(rel)}
+
+
+
+# ---------------------------------------------------------------- automatic Library re-scan
+def _autoscan_loop():
+    """Every 30 min: if a Drive link was scanned before, scan it again (already-processed files are skipped)."""
+    import time as _t
+    from datetime import datetime as _dt, timezone as _tz
+    while True:
+        _t.sleep(300)
+        try:
+            with SessionLocal() as s:
+                link = get_setting(s, "library_drive_link", "")
+                on = get_setting(s, "library_autoscan", True)
+                last = get_setting(s, "library_last_scan", "") or ""
+            if not (link and on) or _lib_job["running"]:
+                continue
+            if last and (_dt.now(_tz.utc) - _dt.fromisoformat(last)).total_seconds() < 1800:
+                continue
+            _bg("Automatic Drive scan", lambda s: library.scan_drive(s, link))
+        except Exception as e:
+            print(f"[autoscan] {str(e)[:160]}")
+
+
+if config.RUN_WORKER:
+    threading.Thread(target=_autoscan_loop, daemon=True, name="library-autoscan").start()

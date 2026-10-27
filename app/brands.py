@@ -107,9 +107,10 @@ def detail(s: Session, key: str, search: str = "", limit: int = 200) -> dict:
                 continue
             if term and term not in _n(p.product_id) + _n(p.name) + _n(p.item_code) + _n(p.ean):
                 continue
-            avail.append({"key": p.key, "code": p.product_id or p.key, "name": p.name, "category": p.category})
-            if len(avail) >= limit:
-                break
+            avail.append({"key": p.key, "code": p.product_id or p.key, "name": p.name, "category": p.category,
+                          **photo_status(s, p.key)})
+        avail.sort(key=lambda x: (x["status"] != "ready", x["status"] != "low_quality", x["photos"] == 0))   # with photos first
+        avail = avail[:limit]
     golden = [f"/files/{x}" for x in d.get("golden") or []]
     return {"key": key, "profile": {k: v for k, v in d.items() if k not in ("queue", "golden")}, "golden": golden,
             "logo": f"/files/{d['logo']}" if d.get("logo") else "", "queue": q_items, "available": avail,

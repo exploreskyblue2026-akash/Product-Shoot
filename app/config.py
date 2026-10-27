@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.1.0 (brand workspace: brand pages, brand queues, brand order)"
+APP_VERSION = "3.2.0 (scan all Raw input automatically, brand pages show photos)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

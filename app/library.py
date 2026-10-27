@@ -116,7 +116,7 @@ def focus_index(s: Session, idx: dict | None = None) -> dict:
     keys = {i["key"] for i in (get_setting(s, "shoot_list", []) or []) if i.get("key")}
     from .brands import queued_keys
     keys |= queued_keys(s)
-    if not keys or not get_setting(s, "library_focus", True):
+    if not keys or not get_setting(s, "library_focus", False):     # default: process everything in Raw input
         return idx
     return {k: p for k, p in idx.items() if p.key in keys}
 
@@ -479,6 +479,8 @@ def scan_drive(s: Session, link: str) -> dict:
                 stats["images"] += 1
         s.commit()
     set_setting(s, "library_drive_link", link)
+    from datetime import datetime as _dt, timezone as _tz
+    set_setting(s, "library_last_scan", _dt.now(_tz.utc).isoformat())
     log(s, "library", f"Drive scan: {stats['images']} photos, {stats['catalogue_images']} catalogue pictures, "
                       f"{len(stats['sheets'])} sheets")
     s.commit()
