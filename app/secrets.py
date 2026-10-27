@@ -8,7 +8,7 @@ from .config import SECRET_KEY
 from .db import SessionLocal, get_setting, set_setting
 
 _f = Fernet(base64.urlsafe_b64encode(hashlib.sha256(SECRET_KEY.encode()).digest()))
-KNOWN = ["GEMINI_API_KEY", "SHOPIFY_ADMIN_TOKEN", "GOOGLE_SERVICE_ACCOUNT_JSON", "REMOVE_BG_API_KEY"]
+KNOWN = ["GEMINI_API_KEY", "SHOPIFY_STORE", "SHOPIFY_ADMIN_TOKEN", "GOOGLE_SERVICE_ACCOUNT_JSON"]
 
 
 def set_secret(name: str, value: str):

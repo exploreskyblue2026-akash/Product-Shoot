@@ -86,6 +86,21 @@ def import_master(s: Session, data: bytes, filename: str = "master.xlsx") -> dic
             else:
                 updated += 1
             p.product_id, p.item_code, p.ean = pid, item, ean
+            extra = {}
+            for ci, h in enumerate(head):
+                hl = str(h or "").strip().lower()
+                v = r[ci] if ci < len(r) else None
+                if v in (None, "") or str(v).startswith("="):
+                    continue
+                if "sku" in hl:
+                    extra.setdefault("skus", []).append(str(v).strip())
+                elif hl in ("mrp", "selling cost", "price", "new mrp", "new sp", "maximum-retail-price"):
+                    extra.setdefault("prices", {})[hl] = v
+                elif hl in ("seo optimised title", "seo optimized title", "product name on amazon"):
+                    extra.setdefault("titles", {})[hl] = str(v).strip()
+                elif hl in ("hsn code",):
+                    extra["hsn"] = str(v)
+            p.data = {**(p.data or {}), **extra}
             p.name = str(_cell(r, m.get("name"))).strip()[:300]
             p.category = str(_cell(r, m.get("category"))).strip()[:80]
             p.brand = ws.title.strip()[:80]

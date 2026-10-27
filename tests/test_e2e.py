@@ -24,6 +24,16 @@ def client():
     return c
 
 
+def wait_job(c, secs=60):
+    import time
+    for _ in range(int(secs / 0.1)):
+        st = c.get("/api/library").json()
+        if not st["job"]["running"]:
+            return st
+        time.sleep(0.1)
+    raise AssertionError("library job did not finish")
+
+
 def test_full_flow():
     c = client()
     assert c.get("/api/health").json()["ok"]
@@ -418,11 +428,12 @@ def test_files_survive_wipe_via_drive_mirror():
     mirror._folder = lambda: "folder"
     try:
         rel = storage.save("shots/TEST/1-hero.jpg", b"jpegbytes")
-        for _ in range(50):
-            if mirror.pending() == 0 and store:
-                break
+        from app.db import SessionLocal, FileMirror
+        for _ in range(200):                                    # wait for the background upload to be recorded
+            with SessionLocal() as s:
+                if s.get(FileMirror, rel):
+                    break
             time.sleep(0.05)
-        time.sleep(0.2)
         (storage.STORAGE_DIR / rel).unlink()                # simulate the redeploy wiping the disk
         assert storage.read(rel) == b"jpegbytes"
     finally:
@@ -492,21 +503,13 @@ def test_product_memory_quality_gate_and_learning():
                                          ("files", ("mem_shoot.xlsx", b.getvalue(), "x/y")),
                                          ("files", ("PIP25-BL front.jpg", photo((20, 60, 200)), "image/jpeg")),
                                          ("files", ("PIP25-YE.jpg", photo((240, 200, 0), 600, blur=4), "image/jpeg"))])
-    for _ in range(100):
-        st = c.get("/api/library").json()
-        if not st["job"]["running"]:
-            break
-        time.sleep(0.1)
+    st = wait_job(c)
     rows = {r["code"]: r for r in st["rows"]}
     assert rows["PIP25/BL"]["status"] == "ready"
     assert rows["PIP25/YE"]["status"] == "low_quality" and "blurry" in rows["PIP25/YE"]["notes"]
     # study + edit + approve memory
-    c.post("/api/library/study-shoot")
-    for _ in range(100):
-        st = c.get("/api/library").json()
-        if not st["job"]["running"]:
-            break
-        time.sleep(0.1)
+    assert c.post("/api/library/study-shoot").status_code == 200
+    st = wait_job(c)
     bl = {r["code"]: r for r in st["rows"]}["PIP25/BL"]
     assert bl["memory"]["facts"]["summary"] and bl["primary"]["angle"] == "front"
     m = c.put(f"/api/library/products/{bl['key']}/memory", json={"facts": {"text": ["TROIKA", "LILIPUT"]}, "approved": True}).json()
@@ -533,3 +536,50 @@ def test_product_memory_quality_gate_and_learning():
     assert seen and "PRODUCT FACTS" in seen[0] and "TROIKA" in seen[0]
     watch = {r["code"]: r for r in c.get("/api/library").json()["rows"]}["PIP25/BL"]["memory"]["facts"]["watch"]
     assert any("TROlKA" in w for w in watch)
+
+
+def test_shopify_queue_push_by_barcode_and_draft():
+    import time
+    from app.connectors import shopify
+    c = client()
+    calls = []
+    store = {"barcode:EXIST": {"id": "gid://shopify/Product/1", "title": "x", "status": "ACTIVE", "media": {"nodes": []}}}
+    def fake_call(q, v=None):
+        calls.append((q.split("(")[0].strip()[:40], v))
+        if "productVariants(first:2" in q:
+            p = store.get(v["q"])
+            return {"productVariants": {"nodes": [{"sku": "", "barcode": "", "product": p}] if p else []}}
+        if "stagedUploadsCreate" in q:
+            return {"stagedUploadsCreate": {"stagedTargets": [{"url": "https://up", "resourceUrl": "https://res/1", "parameters": []}]}}
+        if "productCreateMedia" in q:
+            return {"productCreateMedia": {"mediaUserErrors": []}}
+        if "productCreate(" in q:
+            return {"productCreate": {"product": {"id": "gid://shopify/Product/2", "variants": {"nodes": [{"id": "v1"}]}}, "userErrors": []}}
+        if "productVariantsBulkUpdate" in q:
+            return {"productVariantsBulkUpdate": {"userErrors": []}}
+        raise AssertionError(q[:80])
+    orig_call, orig_post = shopify._call, shopify.httpx.post
+    class R:
+        def raise_for_status(self): pass
+    shopify._call, shopify.httpx.post = fake_call, (lambda *a, **k: R())
+    try:
+        q = c.get("/api/shopify/queue").json()["items"]
+        assert q, "approved products from earlier tests should be waiting"
+        ids = [x["id"] for x in q[:2]]
+        assert c.post("/api/shopify/push", json={"ids": ids}).json()["ok"]
+        for _ in range(100):
+            j = c.get("/api/shopify/queue").json()
+            if not j["job"]["running"]:
+                break
+            time.sleep(0.05)
+        done = {x["id"]: x for x in c.get("/api/shopify/queue").json()["items"]}
+        assert all(done[i]["shopify_status"] == "pushed" for i in ids), [(done[i].get("shopify_status"), done[i].get("shopify_error"), j["job"]) for i in ids]
+        assert any("new draft" in done[i]["shopify_how"] for i in ids)
+        # pushing again never re-uploads shots that are already on the product
+        info = {"title": "T", "barcode": "EXIST", "skus": []}
+        store["barcode:EXIST"]["media"]["nodes"] = [{"alt": "A | Hero"}]
+        r = shopify.push(info, [("a.jpg", b"x", "A | Hero"), ("b.jpg", b"y", "A | Detail")])
+        assert r == {"product_id": "gid://shopify/Product/1", "how": "barcode EXIST", "added": 1, "skipped": 1}
+        assert c.get("/shopify").status_code == 200
+    finally:
+        shopify._call, shopify.httpx.post = orig_call, orig_post

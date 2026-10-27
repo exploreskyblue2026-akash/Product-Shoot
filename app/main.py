@@ -1039,3 +1039,64 @@ def memory_put(key: str, body: MemoryIn, u=Depends(need("editor"))):
         log(s, u.email, f"Product memory {'approved' if mem.get('approved') else 'edited'}: {lp.product_id or key}")
         s.commit()
         return {"ok": True, "memory": mem}
+
+
+
+# ---------------------------------------------------------------- Shopify queue
+_shop_job = {"running": False, "msg": "", "error": ""}
+
+
+@app.get("/shopify")
+def shopify_page(u=Depends(need("editor"))):
+    return FileResponse(config.WEB_DIR / "shopify.html")
+
+
+@app.get("/api/shopify/queue")
+def shopify_queue(u=Depends(need("viewer"))):
+    from . import shopq
+    with SessionLocal() as s:
+        return {"items": shopq.queue(s), "job": dict(_shop_job)}
+
+
+class PushIn(BaseModel):
+    ids: list[int]
+
+
+@app.post("/api/shopify/push")
+def shopify_push(body: PushIn, u=Depends(need("editor"))):
+    from . import shopq
+    if _shop_job["running"]:
+        raise HTTPException(409, "A push is already running")
+    _shop_job.update(running=True, msg=f"Pushing {len(body.ids)} product(s)…", error="")
+
+    def run():
+        ok = fail = 0
+        try:
+            for pid in body.ids:
+                with SessionLocal() as s:
+                    p = s.get(Product, pid)
+                    if not p:
+                        continue
+                    try:
+                        shopq.push_one(s, p)
+                        ok += 1
+                    except Exception as e:
+                        p.data = {**(p.data or {}), "shopify": {"status": "failed", "error": str(e)[:300]}}
+                        s.commit()
+                        fail += 1
+                _shop_job["msg"] = f"Pushed {ok}, failed {fail} of {len(body.ids)}"
+        finally:
+            _shop_job["running"] = False
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True}
+
+
+@app.post("/api/shopify/skip")
+def shopify_skip(body: PushIn, u=Depends(need("editor"))):
+    with SessionLocal() as s:
+        for pid in body.ids:
+            p = s.get(Product, pid)
+            if p:
+                p.data = {**(p.data or {}), "shopify": {"status": "skipped"}}
+        s.commit()
+    return {"ok": True}

@@ -270,12 +270,13 @@ def approve(s: Session, p: Product, who: str):
                 google.upload(sub, name, data)
         except Exception as e:
             errors.append(f"Drive upload failed: {e}")
-    if get_setting(s, "publish_shopify", False):
+    p.data = {**(p.data or {}), "shopify": {**((p.data or {}).get("shopify") or {}), "status": "ready"}}
+    if get_setting(s, "publish_shopify", False):          # optional: push straight away instead of via the Shopify queue
         try:
-            from .connectors import shopify
-            p.shopify_id = shopify.publish(p, finals)
+            from . import shopq
+            shopq.push_one(s, p)
         except Exception as e:
-            errors.append(f"Shopify publish failed: {e}")
+            errors.append(f"Shopify push failed: {e}")
     p.error = " · ".join(errors)[:900]
     log(s, who, f"Approved {p.code}: {len(finals)} shots saved" + (f" ({p.error})" if errors else ""))
     s.commit()
