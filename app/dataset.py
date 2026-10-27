@@ -57,12 +57,23 @@ def seed(s: Session, owner_email: str, owner_hash: str):
             "prompt_template": (DATA_DIR / "static" / "prompt_template.txt").read_text(encoding="utf-8"),
             "strength": DEFAULT_STRENGTH,
         }))
-    if not s.scalars(select(LibraryRow)).first():
-        for table, keycol in LIB_TABLES.items():
-            fname = "props_library.csv" if table == "props" else f"{table}.csv"
-            with open(DATA_DIR / "dynamic" / fname, newline="", encoding="utf-8") as f:
-                for row in csv.DictReader(f):
+    # library rows: add any rows that are new in the shipped CSVs; never overwrite rows you edited in the tool
+    have = {(r.table, r.key) for r in s.scalars(select(LibraryRow))}
+    for table, keycol in LIB_TABLES.items():
+        fname = "props_library.csv" if table == "props" else f"{table}.csv"
+        with open(DATA_DIR / "dynamic" / fname, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if (table, row[keycol]) not in have:
                     s.add(LibraryRow(table=table, key=row[keycol], data=row))
+    # upgrade: 4-shot directions + website size in every rule version (your other rule edits are kept)
+    new_dirs = _read_json("shot_directions.json")
+    for rv in s.scalars(select(RuleVersion)):
+        d = dict(rv.data or {})
+        ids = [x.get("id") for x in (d.get("shot_directions") or {}).get("shots", [])]
+        if ids and ids != [x["id"] for x in new_dirs["shots"]]:
+            d["shot_directions"] = new_dirs
+            d["prompt_template"] = (d.get("prompt_template") or "").replace("2000x2500", "1200x1500")
+            rv.data = d
     for k, v in DEFAULT_SETTINGS.items():
         if s.get(Setting, k) is None:
             set_setting(s, k, v)
@@ -90,6 +101,51 @@ def brand_from_text(s: Session, text: str) -> str:
         if any(k and k in t for k in split(b.get("detect_keywords"))):
             return key
     return "_default"
+
+
+# ---------------------------------------------------------------- SkyBlue house layer + unbranded products
+UNBRANDED = {"", "unbranded", "generic", "no brand", "nobrand", "china", "made in china", "skyblue select", "none", "-"}
+
+
+def is_unbranded(product) -> bool:
+    d = product.data or {}
+    return bool(d.get("unbranded")) or (str(d.get("brand_label", "x")).strip().lower() in UNBRANDED)
+
+
+def brand_display(product, brand_row: dict) -> str:
+    if is_unbranded(product):
+        return "an unbranded product (no brand)"
+    if product.brand_id in ("", "_default"):
+        return (product.data or {}).get("brand_label") or "the product's own brand"
+    return brand_row.get("brand_name", "the brand")
+
+
+def house_block(s, product, shot_id: str) -> str:
+    """Rules that apply to every SkyBlue listing image, plus the no-invented-branding rule for unbranded items."""
+    lines = ["", "[SKYBLUE LISTING STANDARD]",
+             "Image for the SkyBlue online store product listing: 4:5 portrait, product fully visible and centred with "
+             "comfortable space around it so it crops cleanly on mobile. Calm, curated, premium-but-friendly look.",
+             "Never add any text, captions, price tags, badges, watermarks or logos that are not on the real product."]
+    if is_unbranded(product):
+        lines += ["[UNBRANDED PRODUCT] This product carries no brand. Do NOT add any brand name, logo, label or "
+                  "lettering that is not clearly visible in the reference photos. Never show 'Made in China' or supplier marks. "
+                  "Style comes from the product type, not from a brand."]
+    mem = ((product.data or {}).get("memory") or {})
+    if mem.get("approved") or mem.get("facts"):
+        lines += [memory_block(mem, shot_id)]
+    return "\n".join(lines)
+
+
+def memory_block(mem: dict, shot_id: str = "") -> str:
+    f = mem.get("facts") or {}
+    parts = ["[PRODUCT FACTS: reproduce exactly, these override anything else]"]
+    for label, key in (("Product", "summary"), ("Exact printed text / logo", "text"), ("Colours", "colours"),
+                       ("Shape & proportions", "shape"), ("Parts & counts", "parts"), ("Material & finish", "material"),
+                       ("Real size", "size"), ("Must never change", "must_keep"), ("Watch out (past mistakes)", "watch")):
+        v = f.get(key)
+        if v:
+            parts.append(f"- {label}: {', '.join(v) if isinstance(v, list) else v}")
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------- prompt builder
@@ -178,7 +234,7 @@ def build_prompts(s: Session, product, analysis: dict, rv: RuleVersion, notes: d
             "mood_palette": sc["mood"].get("palette", ""), "mood_styling": sc["mood"].get("styling_notes", ""),
             "scene": scene, "surface": surface, "light_ratio": sc["mood"].get("light_ratio", "2:1"),
             "human_line": human, "prop_count": len(plist), "props": ", ".join(plist) if plist else "none",
-            "brand_name": sc["brand"].get("brand_name", "the brand"), "brand_positioning": sc["brand"].get("positioning", ""),
+            "brand_name": brand_display(product, sc["brand"]), "brand_positioning": sc["brand"].get("positioning", ""),
             "brand_palette": sc["brand"].get("palette_hex", ""), "brand_dos": sc["brand"].get("brand_dos") or "-",
             "brand_donts": sc["brand"].get("brand_donts") or "-",
             "negatives": ", ".join(std["global_negative"] + split(sc["mood"].get("avoid", "").replace(", ", "|"))),
@@ -190,6 +246,7 @@ def build_prompts(s: Session, product, analysis: dict, rv: RuleVersion, notes: d
         p = p.replace(p.split("\n")[1], "Professional e-commerce product photograph, 4:5 vertical, 1200x1500 px. " + LIGHT_TEXT[st["lighting"]], 1)
         p = p.replace("The product is the clear hero: ~70% of visual attention on the product, ~30% on set and props.",
                       "The product is the clear hero. " + ATTN_TEXT[st["attention"]])
+        p += house_block(s, product, sid)
         if notes and notes.get(sh["no"]):
             p += f"\n\n[ADJUSTMENT FROM REVIEWER]\n{notes[sh['no']]}"
         out.append({"no": sh["no"], "kind": sid, "prompt": p, "fill": fill, "light": LIGHT_TEXT[st["lighting"]],

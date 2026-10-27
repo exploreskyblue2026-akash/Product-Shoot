@@ -914,3 +914,59 @@ def queue_order(body: OrderIn, u=Depends(need("editor"))):
                 p.data = {**(p.data or {}), "priority": n}
         s.commit()
     return {"ok": True}
+
+
+
+# ---------------------------------------------------------------- brand & category style: golden reference shots
+@app.post("/api/style/{table}/{key}/golden")
+async def golden_add(table: str, key: str, files: list[UploadFile] = File(...), u=Depends(need("admin"))):
+    if table not in ("brands", "categories"):
+        raise HTTPException(404)
+    payload = [(f.filename or "ref.jpg", await f.read()) for f in files]
+    with SessionLocal() as s:
+        r = s.scalars(select(LibraryRow).where(LibraryRow.table == table, LibraryRow.key == key)).first()
+        if not r:
+            raise HTTPException(404, f"No {table[:-1]} {key}")
+        golden = list((r.data or {}).get("golden") or [])
+        for name, data in payload:
+            try:
+                rel = storage.save(f"style/{table}/{storage.safe(key)}/{len(golden) + 1}-{storage.safe(name)}.jpg",
+                                   storage.normalise_raw(data))
+            except Exception:
+                raise HTTPException(400, f"{name} is not an image")
+            golden.append(rel)
+        r.data = {**r.data, "golden": golden[-3:]}           # keep the 3 most recent
+        log(s, u.email, f"Golden reference added to {table[:-1]} {key}")
+        s.commit()
+        return {"ok": True, "golden": [img_url(x) for x in r.data["golden"]]}
+
+
+@app.delete("/api/style/{table}/{key}/golden/{n}")
+def golden_del(table: str, key: str, n: int, u=Depends(need("admin"))):
+    with SessionLocal() as s:
+        r = s.scalars(select(LibraryRow).where(LibraryRow.table == table, LibraryRow.key == key)).first()
+        if not r:
+            raise HTTPException(404)
+        g = list((r.data or {}).get("golden") or [])
+        if 0 <= n < len(g):
+            g.pop(n)
+        r.data = {**r.data, "golden": g}
+        s.commit()
+    return {"ok": True}
+
+
+@app.get("/api/style")
+def style_list(u=Depends(need("viewer"))):
+    """Brand profiles and category styles for the Brands page."""
+    with SessionLocal() as s:
+        out = {}
+        for table in ("brands", "categories"):
+            rows = s.scalars(select(LibraryRow).where(LibraryRow.table == table)).all()
+            out[table] = [{"key": r.key, **{k: v for k, v in (r.data or {}).items() if k != "golden"},
+                           "golden": [img_url(x) for x in (r.data or {}).get("golden") or []]} for r in rows]
+        return out
+
+
+@app.get("/brands")
+def brands_page(u=Depends(need("editor"))):
+    return FileResponse(config.WEB_DIR / "brands.html")

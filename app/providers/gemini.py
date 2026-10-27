@@ -143,13 +143,19 @@ class GeminiProvider:
         r = self._vision(contents, temperature=0.2)
         return _json(r.text)
 
-    def generate(self, prompt: str, raw: bytes, model: str, size: str = IMAGE_SIZE, refs: list | None = None) -> bytes:
+    def generate(self, prompt: str, raw: bytes, model: str, size: str = IMAGE_SIZE, refs: list | None = None,
+                 style: bytes | None = None) -> bytes:
         parts = [types.Part.from_bytes(data=raw, mime_type=_mime(raw))]
         for extra in (refs or [])[:2]:
             parts.append(types.Part.from_bytes(data=extra, mime_type=_mime(extra)))
-        lead = ("Reference image above is the real product. " if len(parts) == 1 else
-                f"The {len(parts)} reference images above all show the SAME real product from different angles; "
+        n = len(parts)
+        lead = ("The first image above is the real product. " if n == 1 else
+                f"The first {n} images above all show the SAME real product from different angles; "
                 "the first is the main reference. Reproduce its exact shape, colours, logo and printed text. ")
+        if style:
+            parts.append(types.Part.from_bytes(data=style, mime_type=_mime(style)))
+            lead += ("The LAST image is a STYLE REFERENCE ONLY: match its lighting, background, colour mood and "
+                     "composition, but do NOT copy any object, product or text from it. ")
         r = self._call(model_name(model), "image",
             contents=parts + [lead + prompt],
             config=types.GenerateContentConfig(

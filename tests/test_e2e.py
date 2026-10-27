@@ -380,7 +380,7 @@ def test_shoot_sheet_with_original_photos():
     assert rows["PEN20/RD"]["status"] == "ready" and rows["PEN20/BK"]["status"] == "needs_photo"
     seen = {}
     orig = mock.MockProvider.generate
-    def spy(self, prompt, raw, model, size="1K", refs=None):
+    def spy(self, prompt, raw, model, size="1K", refs=None, style=None):
         seen.setdefault("refs", []).append(len(refs or []))
         return orig(self, prompt, raw, model, size)
     mock.MockProvider.generate = spy
@@ -439,3 +439,32 @@ def test_queue_drag_order():
         assert c.post("/api/queue/order", json={"ids": ids}).json()["ok"]
         assert [x["id"] for x in c.get("/api/state").json()["queue"]][:len(ids)] == ids
     c.post("/api/autopilot", json={"pipeline_mode": "v1"})
+
+
+def test_brand_layer_house_style_unbranded_and_golden():
+    import io
+    from PIL import Image
+    from app.providers import mock
+    c = client()
+    st = c.get("/api/style").json()
+    keys = {b["key"] for b in st["brands"]}
+    assert {"_default", "troika", "milan", "apli"} <= keys
+    b = io.BytesIO(); Image.new("RGB", (800, 1000), (240, 236, 228)).save(b, "JPEG")
+    r = c.post("/api/style/brands/troika/golden", files=[("files", ("gold.jpg", b.getvalue(), "image/jpeg"))]).json()
+    assert len(r["golden"]) == 1 and c.get(r["golden"][0]).status_code == 200
+    assert c.get("/brands").status_code == 200
+    # unbranded product: prompt forbids invented branding; style reference passed for a branded one
+    from app.db import SessionLocal, Product
+    from app.dataset import build_prompts, live_rules
+    from app import pipeline as pl
+    with SessionLocal() as s:
+        p = Product(code="GEN-1", name="Desk organiser", brand_id="_default", category_id="desk_acc",
+                    data={"brand_label": "Made in China"})
+        s.add(p); s.flush()
+        prompt = build_prompts(s, p, {}, live_rules(s))[0]["prompt"]
+        assert "UNBRANDED PRODUCT" in prompt and "SKYBLUE LISTING STANDARD" in prompt
+        t = Product(code="TRV20/GY", name="Troika case", brand_id="troika", category_id="bag_travel", data={"brand_label": "TROIKA"})
+        s.add(t); s.flush()
+        assert "UNBRANDED" not in build_prompts(s, t, {}, live_rules(s))[0]["prompt"]
+        assert pl.style_reference(s, t) is not None
+        s.rollback()

@@ -50,6 +50,23 @@ def _model_for(s: Session, kind: str) -> tuple[str, str]:
     return config.model_name(config.mode_model(pick)), size
 
 
+def style_reference(s: Session, p: Product) -> bytes | None:
+    """One approved 'golden' shot: the brand's, or for unbranded / no-profile products the category's."""
+    from .dataset import is_unbranded
+    rows = []
+    if p.brand_id and p.brand_id != "_default" and not is_unbranded(p):
+        rows.append(library(s, "brands").get(p.brand_id) or {})
+    rows.append(library(s, "categories").get(p.category_id) or {})
+    rows.append(library(s, "brands").get("_default") or {})
+    for row in rows:
+        for rel in row.get("golden") or []:
+            try:
+                return storage.read(rel)
+            except Exception:
+                continue
+    return None
+
+
 def analyse(s: Session, p: Product, prov, raw: bytes):
     rv = live_rules(s)
     cats = library(s, "categories")
@@ -112,6 +129,7 @@ def process(pid: int, only: list[int] | None = None):
         if (p.data or {}).get("v2"):                    # shoot sheet: only the shots it asks for
             from .v2 import requested_shots
             defaults = requested_shots(s, p)
+        style = style_reference(s, p)
         refs = []
         for rel in ((p.data or {}).get("refs") or [])[1:]:   # extra angles of the same product from the Library
             try:
@@ -137,7 +155,7 @@ def process(pid: int, only: list[int] | None = None):
                     stop_reason = f"Stopped at the ${cap:.2f} per-product cost limit"
                     break
                 sh.attempts = (sh.attempts or 0) + 1
-                img = storage.to_output(prov.generate(prompt, raw, model, size, refs=refs))
+                img = storage.to_output(prov.generate(prompt, raw, model, size, refs=refs, style=style))
                 used = getattr(prov, "last_model", None) or model     # may differ after a fallback
                 sh.model = used
                 _charge(s, p, "image", used, config.image_cost(used, size), sh)
