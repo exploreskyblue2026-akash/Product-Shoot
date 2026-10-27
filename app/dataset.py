@@ -14,7 +14,7 @@ DEFAULT_STRENGTH = {"lighting": "strict", "attention": "normal", "size": "normal
 
 DEFAULT_SETTINGS = {
     "library_cutouts": False,      # False: keep original photos (AI generation). True: cut-outs + composite engine
-    "pipeline_mode": "v1",         # v1: AI draws product + scene · v2: real cut-out + AI scene, shoot sheet only
+    "pipeline_mode": "v2",         # v2 = shoot-sheet flow (the only flow on screen); v1 = old 'add input' flow. v1: AI draws product + scene · v2: real cut-out + AI scene, shoot sheet only
     "scene_strategy": "auto",      # v2 scenes: auto | mix | pool | fresh
     "scene_reuse": 10,             # v2: a pool scene is reused for at most this many products
     "fresh_brands": "",            # v2: brands that always get fresh scenes (comma separated)
@@ -22,7 +22,7 @@ DEFAULT_SETTINGS = {
     "auto_approve": True,          # approve when every QC check passes
     "retries": 0,                  # automatic regenerations after a QC fail (each one costs a full image)
     "cost_mode": "economy",        # economy | standard | premium  (model + resolution per shot)
-    "default_shots": [1],          # shots generated automatically; others on demand from the studio
+    "default_shots": [1, 2, 3, 4],          # shots generated automatically; others on demand from the studio
     "max_cost_product": 0.30,      # USD hard cap per product (images + checks)
     "daily_budget": 3.0,           # USD per day; autopilot pauses when reached
     "hero_gate": True,             # if the hero fails QC, don't generate the other shots
@@ -187,7 +187,7 @@ def build_prompts(s: Session, product, analysis: dict, rv: RuleVersion, notes: d
         for k, v in fill.items():
             p = p.replace("{" + k + "}", str(v))
         # strength layer: rewrite the lighting + attention sentences
-        p = p.replace(p.split("\n")[1], "Professional e-commerce product photograph, 4:5 vertical, 2000x2500 px. " + LIGHT_TEXT[st["lighting"]], 1)
+        p = p.replace(p.split("\n")[1], "Professional e-commerce product photograph, 4:5 vertical, 1200x1500 px. " + LIGHT_TEXT[st["lighting"]], 1)
         p = p.replace("The product is the clear hero: ~70% of visual attention on the product, ~30% on set and props.",
                       "The product is the clear hero. " + ATTN_TEXT[st["attention"]])
         if notes and notes.get(sh["no"]):

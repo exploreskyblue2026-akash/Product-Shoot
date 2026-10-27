@@ -83,7 +83,10 @@ def files(rel: str, u=Depends(need("viewer"))):
 
 @app.get("/api/health")
 def health():
+    from .connectors import mirror
+    db = "postgres (permanent)" if config.DATABASE_URL.startswith("postgresql") else "sqlite (wiped on redeploy)"
     return {"ok": True, "version": config.APP_VERSION, "provider": config.PROVIDER, "worker": config.RUN_WORKER,
+            "database": db, "file_mirror": mirror.enabled(), "mirror_pending": mirror.pending(),
             "vision_model": config.model_name(config.MODEL_VISION)}
 
 
@@ -337,7 +340,7 @@ def approve(pid: int, body: ApproveIn | None = None, u=Depends(need("editor"))):
             missing = [n for n in requested_shots(s, p) if n not in have]
         if body.make:
             have = {sh.no for sh in p.shots if sh.image_path}
-            missing = sorted({int(n) for n in body.make if 1 <= int(n) <= 5 and int(n) not in have})
+            missing = sorted({int(n) for n in body.make if int(n) in pipeline.SHOT_NAMES and int(n) not in have})
         if missing and not body.save_now:
             # approve what exists, then make the remaining shots; the product is saved once they are done
             for sh in p.shots:
@@ -892,5 +895,22 @@ def pause(pid: int, body: PauseIn, u=Depends(need("editor"))):
         p = _get(s, pid)
         p.data = {**(p.data or {}), "paused": body.paused}
         log(s, u.email, f"{'Paused' if body.paused else 'Resumed'} {p.code}")
+        s.commit()
+    return {"ok": True}
+
+
+
+class OrderIn(BaseModel):
+    ids: list[int]
+
+
+@app.post("/api/queue/order")
+def queue_order(body: OrderIn, u=Depends(need("editor"))):
+    """Drag & drop: the queue's new order, top first."""
+    with SessionLocal() as s:
+        for n, pid in enumerate(body.ids, 1):
+            p = s.get(Product, pid)
+            if p:
+                p.data = {**(p.data or {}), "priority": n}
         s.commit()
     return {"ok": True}

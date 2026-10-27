@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 TMP = tempfile.mkdtemp()
-os.environ.update({"AI_PROVIDER": "mock", "DATABASE_URL": f"sqlite:///{TMP}/t.db", "STORAGE_DIR": f"{TMP}/store",
+os.environ.update({"AI_PROVIDER": "mock", "DATABASE_URL": os.environ.get("TEST_DATABASE_URL", f"sqlite:///{TMP}/t.db"), "STORAGE_DIR": f"{TMP}/store",
                    "RUN_WORKER": "false", "COOKIE_SECURE": "false", "OWNER_EMAIL": "owner@test.com",
                    "OWNER_PASSWORD": "pw-for-tests", "SECRET_KEY": "test"})
 
@@ -20,6 +20,7 @@ def client():
     c.__enter__()
     r = c.post("/api/login", json={"email": "owner@test.com", "password": "pw-for-tests"})
     assert r.status_code == 200, r.text
+    c.post("/api/autopilot", json={"pipeline_mode": "v1"})   # legacy 'add input' flow; shoot-sheet tests switch to v2
     return c
 
 
@@ -35,7 +36,7 @@ def test_full_flow():
     brands = {q["code"]: q["brand"] for q in st["queue"]}
     assert brands["WAT-HEM-SSGT"] == "waterman" and brands["CAM-AOC-12"] == "camel"
 
-    c.put("/api/admin/settings", json={"default_shots": [1, 2, 3, 4, 5], "max_cost_product": 5, "daily_budget": 100,
+    c.put("/api/admin/settings", json={"default_shots": [1, 2, 3, 4], "max_cost_product": 5, "daily_budget": 100,
                                        "retries": 2, "hero_gate": False, "qc_mode": "full"})
     c.post("/api/autopilot", json={"autopilot": True, "auto_approve": True})
     for _ in range(10):
@@ -48,12 +49,12 @@ def test_full_flow():
     assert saved, "autopilot should save products whose QC passes"
 
     p = c.get(f"/api/products/{saved[0]['id']}").json()
-    assert len(p["shots"]) == 5 and all(s["image"] for s in p["shots"])
+    assert len(p["shots"]) == 4 and all(s["image"] for s in p["shots"])
     img = c.get(p["shots"][0]["image"])
     assert img.status_code == 200 and img.content[:2] == b"\xff\xd8"
     from PIL import Image
     import io
-    assert Image.open(io.BytesIO(img.content)).size == (2000, 2500)
+    assert Image.open(io.BytesIO(img.content)).size == (1200, 1500)
     assert "STRICTLY SOFT" in pipeline.SessionLocal().get(pipeline.Shot, 1).prompt
 
     # regenerate one shot with a note, then approve
@@ -140,10 +141,10 @@ def test_cost_controls():
     assert len(made) == 1 and made[0]["attempts"] == 1 and "lite" in made[0]["model"]
     assert prod["cost"] < 0.05
     # on-demand: generate shot 5 only
-    c.post(f"/api/products/{pid}/regenerate", json={"shot": 5})
+    c.post(f"/api/products/{pid}/regenerate", json={"shot": 4})
     pipeline.tick()
     prod = c.get(f"/api/products/{pid}").json()
-    assert [s["no"] for s in prod["shots"] if s["image"]] == [1, 5]
+    assert [s["no"] for s in prod["shots"] if s["image"]] == [1, 4]
     # cap: a tiny limit stops generation before spending
     c.put("/api/admin/settings", json={"max_cost_product": 0.001})
     c.post(f"/api/products/{pid}/regenerate", json={"shot": 2})
@@ -188,7 +189,7 @@ def test_approve_hero_then_rest_stop_and_remove():
     c.post(f"/api/products/{pid}/run"); pipeline.tick()
     assert c.get(f"/api/products/{pid}").json()["stage"] == "review"
     r = c.post(f"/api/products/{pid}/approve", json={}).json()
-    assert r["generating"] == [2, 3, 4, 5]
+    assert r["generating"] == [2, 3, 4]
     pipeline.tick()
     prod = c.get(f"/api/products/{pid}").json()
     assert all(s["image"] for s in prod["shots"]) and prod["stage"] == "review"
@@ -287,7 +288,7 @@ def test_v2_shoot_sheet_only():
         if p["key"] in ("TRV20GY", "TRV20BK"):
             c.post(f"/api/library/images/{p['id']}/cutout", files={"file": ("c.png", cut((50, 50, 50)), "image/png")})
     c.put("/api/admin/settings", json={"scene_strategy": "auto", "max_cost_product": 5, "daily_budget": 100,
-                                       "default_shots": [1, 2, 3, 4, 5]})
+                                       "default_shots": [1, 2, 3, 4]})
     c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": False})
     r = c.post("/api/v2/load-shoot").json()
     assert r["total"] == 4 and r["missing"] == 1 and r["waiting"] == 1, r
@@ -331,8 +332,8 @@ def test_saved_hero_only_can_make_more():
     c.post(f"/api/products/{pid}/run"); pipeline.tick()
     c.post(f"/api/products/{pid}/approve", json={"save_now": True})
     assert c.get(f"/api/products/{pid}").json()["stage"] == "saved"
-    r = c.post(f"/api/products/{pid}/approve", json={"make": [2, 3, 4, 5]}).json()
-    assert r["generating"] == [2, 3, 4, 5]
+    r = c.post(f"/api/products/{pid}/approve", json={"make": [2, 3, 4]}).json()
+    assert r["generating"] == [2, 3, 4]
     pipeline.tick()
     prod = c.get(f"/api/products/{pid}").json()
     assert all(s["image"] for s in prod["shots"])
@@ -347,7 +348,7 @@ def test_shoot_sheet_with_original_photos():
     from app.providers import mock
     c = client()
     c.put("/api/admin/settings", json={"library_cutouts": False, "max_cost_product": 5, "daily_budget": 100,
-                                       "default_shots": [1, 2, 3, 4, 5], "hero_gate": False})
+                                       "default_shots": [1, 2, 3, 4], "hero_gate": False})
     c.post("/api/library/clear")
     LIB = Path(__file__).parent / "library"
     def photo(color, size=1200, side=False):
@@ -398,7 +399,43 @@ def test_shoot_sheet_with_original_photos():
     ye = c.get(f"/api/products/{allp['PEN20/YE']['id']}").json()
     rd = c.get(f"/api/products/{allp['PEN20/RD']['id']}").json()
     assert [s["no"] for s in ye["shots"] if s["image"]] == [1, 2]                  # only the listed shots
-    assert [s["no"] for s in rd["shots"] if s["image"]] == [1, 2, 3, 4, 5]         # blank = default (all 5)
+    assert [s["no"] for s in rd["shots"] if s["image"]] == [1, 2, 3, 4]            # blank = default (all 4)
     assert allp["PEN20/BK"]["stage"] == "needs_photo"
     assert 1 in seen["refs"]                                                       # YE got its second angle
     c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+
+
+def test_files_survive_wipe_via_drive_mirror():
+    """Files saved locally are mirrored to Drive and restored when the local disk is wiped (redeploy)."""
+    import time
+    from app.connectors import mirror, google, storage
+    client()                                                # creates the tables
+    store = {}
+    orig = (google.upload, google.download, mirror.enabled, mirror._folder)
+    google.upload = lambda folder, name, data, mime="image/jpeg": store.setdefault(name, data) and f"id-{name}"
+    google.download = lambda fid: store[fid[3:]]
+    mirror.enabled = lambda: True
+    mirror._folder = lambda: "folder"
+    try:
+        rel = storage.save("shots/TEST/1-hero.jpg", b"jpegbytes")
+        for _ in range(50):
+            if mirror.pending() == 0 and store:
+                break
+            time.sleep(0.05)
+        time.sleep(0.2)
+        (storage.STORAGE_DIR / rel).unlink()                # simulate the redeploy wiping the disk
+        assert storage.read(rel) == b"jpegbytes"
+    finally:
+        google.upload, google.download, mirror.enabled, mirror._folder = orig
+
+
+
+def test_queue_drag_order():
+    c = client()
+    c.post("/api/autopilot", json={"pipeline_mode": "v2"})
+    q = c.get("/api/state").json()["queue"]
+    if len(q) >= 2:
+        ids = [x["id"] for x in q][::-1]
+        assert c.post("/api/queue/order", json={"ids": ids}).json()["ok"]
+        assert [x["id"] for x in c.get("/api/state").json()["queue"]][:len(ids)] == ids
+    c.post("/api/autopilot", json={"pipeline_mode": "v1"})

@@ -26,6 +26,7 @@
 .mode button{text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:8px 10px;cursor:pointer;min-width:0}
 .mode button[aria-checked="true"]{border-color:var(--azure);box-shadow:inset 0 0 0 1px var(--azure);background:var(--celeste-soft)}
 .mode b{display:block;font-size:13px}.mode small{display:block;font-size:11px;color:var(--muted);line-height:1.25}
+#queue .li[draggable="true"]{cursor:grab}#queue .li.dragging{opacity:.45;outline:2px dashed var(--azure)}
 .step-n{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:3px;background:var(--azure);color:var(--on-azure);font-size:11px;font-weight:800;margin-right:8px;vertical-align:1px}
 
 /* autopilot canvas block */
@@ -78,9 +79,9 @@ button.li{cursor:pointer}button.li:hover{border-color:var(--azure)}
 .progress{height:4px;border-radius:2px;background:var(--line);overflow:hidden}
 .progress i{display:block;height:100%;background:var(--azure);transition:width .4s}
 
-.gallery{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-.gallery .shot:first-child{grid-column:span 2;grid-row:span 2}
-@media (max-width:640px){.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}.gallery .shot:first-child{grid-column:span 2;grid-row:auto}}
+.gallery{display:grid;grid-template-columns:3fr 1fr;gap:10px}
+.gallery .shot:first-child{grid-row:span 3}
+@media (max-width:640px){.gallery{grid-template-columns:repeat(3,minmax(0,1fr))}.gallery .shot:first-child{grid-column:span 3;grid-row:auto}}
 .shot{all:unset;position:relative;aspect-ratio:4/5;max-width:100%;border-radius:4px;overflow:hidden;background:var(--surface);border:1px solid var(--line);cursor:pointer}
 .shot:focus-visible{outline:2px solid var(--azure);outline-offset:2px}
 .shot[aria-pressed="true"]{outline:3px solid var(--azure);outline-offset:-3px}
@@ -120,7 +121,7 @@ body{margin:0}[hidden]{display:none!important}
       <span class="mono hint" id="spend">$0.00 today</span>
     </div>
 
-    <div class="mode" role="radiogroup" aria-label="Pipeline">
+    <div class="mode" role="radiogroup" aria-label="Pipeline" hidden>
       <button type="button" role="radio" data-mode="v1" aria-checked="true"><b>Add input</b><small>Any files/folders you add here</small></button>
       <button type="button" role="radio" data-mode="v2" aria-checked="false"><b>Shoot sheet</b><small>Only the codes + shots in the sheet</small></button>
     </div>
@@ -144,7 +145,7 @@ body{margin:0}[hidden]{display:none!important}
       <div class="sec-h"><h2 id="v2-h"><span class="step-n">1</span>Shoot sheet</h2><a class="btn sm" href="/library">Open Library</a></div>
       <p class="hint" style="margin:0" id="v2-sum">—</p>
       <button class="btn primary" type="button" id="v2-load" style="width:100%">Load shoot sheet into queue</button>
-      <p class="hint" style="margin:0">Only the codes in the shoot sheet are queued, with only the shots it asks for. The AI gets each product's best Library photos (up to 3 angles). Drive folders are not watched in this mode.</p>
+      <p class="hint" style="margin:0">Drag products in the queue to change their order. Only the codes in the shoot sheet are queued, with only the shots it asks for. The AI gets each product's best Library photos (up to 3 angles). Drive folders are not watched in this mode.</p>
     </section>
 
     <section class="sec v1only" aria-labelledby="in-h">
@@ -223,7 +224,7 @@ body{margin:0}[hidden]{display:none!important}
 
 <script>
 (function(){
-const SHOTS=["Hero","Use case","Detail","Arrangement","Lifestyle"];
+const SHOTS=["Hero","Detail","Use case","Lifestyle"];
 const QCL={product_exact:"Real product (not redrawn)",shape_match:"Shape match",colour_match:"Colour match",label_text:"Label text",soft_light:"Soft light only",attention_70_30:"70 / 30 focus",props_ok:"Props ≤ 5, odd",no_artifacts:"No artefacts",margin_ok:"Margin ≥ 8%"};
 const TYPE={drive:["Drive folder link","https://drive.google.com/drive/folders/…",0],catalogue:["Catalogue PDF link (or drop the PDF)","https://brand.com/catalogue.pdf",1],files:["","",0],sheet:["Sheet link","https://docs.google.com/spreadsheets/d/…",2],shopify:["Store (leave blank to use the connected store)","",3],url:["Product page link","https://…",1]};
 const IC={drive:'<path d="M8 3h8l6 11-4 7H6l-4-7z"/>',catalogue:'<path d="M4 4h10a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4z"/>',files:'<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',sheet:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/>',shopify:'<path d="M5 8h14l-1 12H6z"/><path d="M9 8a3 3 0 0 1 6 0"/>',url:'<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/>'};
@@ -248,21 +249,21 @@ function renderLeft(){
   $("#spend").textContent="₹"+Math.round(S.spend_today*(S.usd_inr||88))+" / ₹"+Math.round(S.daily_budget*(S.usd_inr||88))+" today";
   $("#repo-n").textContent=S.sources.length;
   $("#repos").innerHTML=S.sources.map(r=>`<div class="li"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${IC[r.type]||IC.url}</svg></span><span style="min-width:0"><b>${esc(r.name)}</b><small title="${esc(r.error||r.detail)}">${esc(r.status=="error"?"Error: "+r.error:r.status=="new"?"Scanning…":r.detail)}</small></span><span class="chip ${r.status=="error"?"bad":r.watch?"info":"mute"}">${r.count}${r.watch?" · watching":""}</span></div>`).join("")||'<div class="empty">No inputs yet</div>';
-  const chip=q=>q.paused?'<span class="chip mute">Paused</span>':({gen:`<span class="chip info">${q.done}/${q.v2&&q.shots_wanted.length?q.shots_wanted.length:5}</span>`,review:'<span class="chip warn">Review</span>',error:'<span class="chip bad">Error</span>',needs_photo:'<span class="chip mute">No photo</span>'})[q.stage]||'<span class="chip mute">Waiting</span>';
+  const chip=q=>q.paused?'<span class="chip mute">Paused</span>':({gen:`<span class="chip info">${q.done}/${q.v2&&q.shots_wanted.length?q.shots_wanted.length:4}</span>`,review:'<span class="chip warn">Review</span>',error:'<span class="chip bad">Error</span>',needs_photo:'<span class="chip mute">No photo</span>'})[q.stage]||'<span class="chip mute">Waiting</span>';
   $("#queue").innerHTML=S.queue.map(q=>li(q,chip(q))).join("")||'<div class="empty">Queue is empty. Add an input above.</div>';
   $("#saved").innerHTML=S.saved.map(q=>li(q,'<span class="chip ok">Saved</span>')).join("")||'<div class="empty">Approved shots are saved here</div>';
   $("#admin-link").hidden=!(S.user.role=="admin"||S.user.role=="owner")}
-function li(q,extra){return `<button type="button" class="li${q.id===cur?" now":""}" data-id="${q.id}"><span class="ic">${esc((q.brand||q.code).slice(0,2).toUpperCase())}</span><span style="min-width:0"><b class="mono">${esc(q.code)}</b><small>${esc(q.name)}</small></span>${extra}</button>`}
+function li(q,extra){return `<button type="button" class="li${q.id===cur?" now":""}" data-id="${q.id}"${q.stage!="saved"&&q.stage!="gen"?' draggable="true" title="Drag to change priority"':""}><span class="ic">${esc((q.brand||q.code).slice(0,2).toUpperCase())}</span><span style="min-width:0"><b class="mono">${esc(q.code)}</b><small>${esc(q.name)}</small></span>${extra}</button>`}
 
 function renderStage(){
   if(!P){$("#p-code").textContent="—";$("#p-name").textContent="Add an input to start";$("#gallery").innerHTML="";$("#actions").innerHTML="";$("#qc").innerHTML="";$("#p-state").textContent="—";return}
   $("#p-code").textContent=P.code+(P.brand?" · "+P.brand:"");$("#p-name").textContent=P.name;
   const fl={needs_photo:1,queue:1,gen:2,error:2,review:3,saved:4}[P.stage]||1;["f1","f2","f3","f4"].forEach((f,i)=>{$("#"+f).className=i+1<fl?"done":i+1==fl?"on":""});
   $("#p-bar").style.width=({queue:5,needs_photo:2,gen:20+P.done*12,error:20+P.done*12,review:85,saved:100}[P.stage]||5)+"%";
-  const st={queue:["Waiting in queue","mute"],needs_photo:["Waiting for a photo","mute"],gen:["Generating "+P.done+"/5","info"],review:["Needs your approval","warn"],saved:["Approved · saved","ok"],error:["Stopped: "+(P.error||"error").slice(0,80),"bad"]}[P.stage]||["—","mute"];
+  const st={queue:["Waiting in queue","mute"],needs_photo:["Waiting for a photo","mute"],gen:["Generating "+P.done+"/"+(P.v2&&P.shots_wanted.length?P.shots_wanted.length:4),"info"],review:["Needs your approval","warn"],saved:["Approved · saved","ok"],error:["Stopped: "+(P.error||"error").slice(0,80),"bad"]}[P.stage]||["—","mute"];
   $("#p-state").className="chip "+st[1];$("#p-state").textContent=st[0];
   const g=$("#gallery");const html=P.shots.map((s,i)=>{const ready=!!s.image;const flag=s.status=="pass"?["ok","QC pass"]:s.status=="fail"?["bad","QC fail"]:s.status=="approved"?["info","Approved"]:s.status=="unchecked"?["warn","Check by eye"]:null;
-    return `<button type="button" class="shot p${i}${s.status=="gen"?" gen":""}" data-shot="${i}" aria-pressed="${i===sel}" aria-label="Shot ${i+1} ${SHOTS[i]}">${ready?`<img src="${esc(s.image)}" alt="${SHOTS[i]} shot of ${esc(P.name)}" loading="lazy">`:`<span class="ph"><b>${SHOTS[i]}</b><span>${s.status=="gen"?"Generating…":P.v2&&P.shots_wanted.length&&!P.shots_wanted.includes(i+1)?"Not requested in shoot sheet":"Not generated yet"}</span></span>`}<span class="cap"><span>${i+1} · ${SHOTS[i]}</span>${i==0?"<span>4:5 · 2000×2500</span>":""}</span>${flag?`<span class="flag chip ${flag[0]}">${flag[1]}</span>`:""}</button>`}).join("");
+    return `<button type="button" class="shot p${i}${s.status=="gen"?" gen":""}" data-shot="${i}" aria-pressed="${i===sel}" aria-label="Shot ${i+1} ${SHOTS[i]}">${ready?`<img src="${esc(s.image)}" alt="${SHOTS[i]} shot of ${esc(P.name)}" loading="lazy">`:`<span class="ph"><b>${SHOTS[i]}</b><span>${s.status=="gen"?"Generating…":P.v2&&P.shots_wanted.length&&!P.shots_wanted.includes(i+1)?"Not requested in shoot sheet":"Not generated yet"}</span></span>`}<span class="cap"><span>${i+1} · ${SHOTS[i]}</span>${i==0?"<span>4:5 · 1200×1500</span>":""}</span>${flag?`<span class="flag chip ${flag[0]}">${flag[1]}</span>`:""}</button>`}).join("");
   if(g.dataset.sig!==html){g.innerHTML=html;g.dataset.sig=html}
   const s=P.shots[sel];$("#qc-shot").textContent=(sel+1)+" "+SHOTS[sel];
   const c=(s.qc&&s.qc.checks)||null,why=(s.qc&&s.qc.reasons)||{};
@@ -291,6 +292,14 @@ $("#ap").addEventListener("click",()=>{const on=$("#ap").getAttribute("aria-chec
 document.querySelectorAll(".mode [data-mode]").forEach(b=>b.addEventListener("click",async()=>{if(b.getAttribute("aria-checked")=="true")return;
   try{await api("/api/autopilot",{method:"POST",body:{pipeline_mode:b.dataset.mode}});cur=null;P=null;toast(b.dataset.mode=="v2"?"Shoot sheet mode: only the codes and shots in the sheet":"Add input mode");await refresh()}catch(e){toast(e.message)}}));
 $("#v2-load").addEventListener("click",async()=>{try{const r=await api("/api/v2/load-shoot",{method:"POST"});toast(`${r.total} codes: ${r.total-r.waiting-r.missing} ready to generate, ${r.waiting} waiting for photo/cut-out, ${r.missing} not in master`);await refresh()}catch(e){toast(e.message)}});
+// drag & drop priority in the queue
+(()=>{const box=$("#queue");let drag=null;
+  box.addEventListener("dragstart",e=>{drag=e.target.closest(".li");if(!drag)return;drag.classList.add("dragging");e.dataTransfer.effectAllowed="move"});
+  box.addEventListener("dragend",async()=>{if(!drag)return;drag.classList.remove("dragging");drag=null;
+    const ids=[...box.querySelectorAll(".li")].map(x=>+x.dataset.id);
+    try{await api("/api/queue/order",{method:"POST",body:{ids}});toast("Queue order saved");await refresh()}catch(e){toast(e.message)}});
+  box.addEventListener("dragover",e=>{if(!drag)return;e.preventDefault();const over=e.target.closest(".li");if(!over||over===drag)return;
+    const r=over.getBoundingClientRect();box.insertBefore(drag,(e.clientY-r.top)>r.height/2?over.nextSibling:over)});})();
 $("#stop-all").addEventListener("click",async()=>{try{await api("/api/stop",{method:"POST"});toast("Stopping: the current image finishes, nothing new starts");await refresh()}catch(e){toast(e.message)}});
 $("#o-approve").addEventListener("change",e=>setAuto({auto_approve:e.target.checked}));
 $("#o-shopify").addEventListener("change",e=>setAuto({publish_shopify:e.target.checked}));

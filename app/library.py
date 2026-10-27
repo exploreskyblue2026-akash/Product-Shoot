@@ -147,7 +147,7 @@ def import_shoot(s: Session, data: bytes, filename: str = "shoot.xlsx") -> dict:
         if raw in ("", None):
             continue
         p, how = resolve(raw, idx)
-        shots = [int(x) for x in re.findall(r"[1-5]", str(_cell(r, si)))] or []
+        shots = [int(x) for x in re.findall(r"[1-4]", str(_cell(r, si)))] or []
         try:
             prio = int(float(_cell(r, pi) or 0)) or (1000 + n)
         except ValueError:

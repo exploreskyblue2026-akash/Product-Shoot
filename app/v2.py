@@ -207,8 +207,8 @@ def choose_scene(s: Session, p: Product, kind: str, forced_fresh: bool) -> Scene
 def requested_shots(s: Session, p: Product) -> list[int]:
     want = (p.data or {}).get("shots") or []
     if want:
-        return sorted({int(x) for x in want if 1 <= int(x) <= 5})
-    return [int(x) for x in (get_setting(s, "default_shots", [1]) or [1])]
+        return sorted({int(x) for x in want if 1 <= int(x) <= 4})
+    return [int(x) for x in (get_setting(s, "default_shots", [1]) or [1]) if 1 <= int(x) <= 4]
 
 
 def make_shot(s: Session, p: Product, sh: Shot, spec: dict, prov, cutout: bytes, fresh: bool, charge) -> dict:

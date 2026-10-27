@@ -187,6 +187,14 @@ class SceneAsset(Base):
     retired: Mapped[bool] = mapped_column(Boolean, default=False)
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
+
+class FileMirror(Base):
+    """Where each stored file lives in Google Drive, so it can be restored after a redeploy wipes the local disk."""
+    __tablename__ = "file_mirror"
+    rel: Mapped[str] = mapped_column(String(500), primary_key=True)
+    drive_id: Mapped[str] = mapped_column(String(100))
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
 def init_db():
     Base.metadata.create_all(engine)
 

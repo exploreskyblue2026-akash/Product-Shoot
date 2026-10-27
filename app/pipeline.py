@@ -12,7 +12,7 @@ from .dataset import build_prompts, library, live_rules, split
 from .db import SessionLocal, Product, Shot, Source, Usage, get_setting, log, now
 from .providers import get_provider
 
-SHOT_NAMES = {1: "hero", 2: "use_case", 3: "detail", 4: "arrangement", 5: "lifestyle"}
+SHOT_NAMES = {1: "hero", 2: "detail", 3: "use_case", 4: "lifestyle"}      # 4 shots: arrangement dropped for accuracy
 _lock = threading.Lock()
 STOP = threading.Event()          # set by the Stop button: finish nothing new, stop between attempts
 
@@ -108,7 +108,7 @@ def process(pid: int, only: list[int] | None = None):
         qc_mode = get_setting(s, "qc_mode", "light")
         cap = float(get_setting(s, "max_cost_product", 0.30))
         hero_gate = bool(get_setting(s, "hero_gate", True))
-        defaults = [int(x) for x in (get_setting(s, "default_shots", [1]) or [1])]
+        defaults = [int(x) for x in (get_setting(s, "default_shots", [1]) or [1]) if int(x) in SHOT_NAMES]
         if (p.data or {}).get("v2"):                    # shoot sheet: only the shots it asks for
             from .v2 import requested_shots
             defaults = requested_shots(s, p)
