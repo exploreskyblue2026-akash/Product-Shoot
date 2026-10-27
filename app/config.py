@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.0.0-dev (persistence, 4 shots, website size, drag & drop)"
+APP_VERSION = "3.0.0 (Library + brand profiles + product memory + 4 shots + Shopify queue + permanent data)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

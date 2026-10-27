@@ -93,3 +93,20 @@ Each image and QC call is logged with an estimated cost (`COST_IMAGE_PRO`, `COST
 - The image models are told to keep the product exact, but they can still alter labels; the QC step catches most of this and sends the product to review.
 - Catalogue and web-link inputs are best effort. Drive folders with `CODE_angle.jpg` names give the most reliable results.
 - Generation runs one product at a time.
+
+## Version 3 flow
+
+1. **Raw input**: dump photos, ZIPs, catalogue PDFs and the master sheet into Drive → Raw input (or upload on the Library page).
+2. **Product Library** (`/library`): only shoot-sheet codes are processed. Images are grouped by code, duplicates dropped,
+   photos checked (size + sharpness) and tagged by angle. Each product is studied once into a **product memory**
+   (exact text, colours, shape, parts) that you check and approve.
+3. **Brands** (`/brands`): SkyBlue house style + one profile per brand + category styles, with up to 3 golden shots each.
+   Unbranded products use the house style + category style and never get an invented logo.
+4. **Studio** (`/`): load the shoot sheet; drag to reorder; 4 shots per product (hero, detail, use case, lifestyle),
+   1200×1500 compressed (website listing size). QC checks the product memory; fails are learned.
+5. **Shopify** (`/shopify`): push approved shots to the store product found by barcode, then SKU; drafts for new products.
+
+### Keep data across redeploys (do once)
+- `DATABASE_URL` = a Postgres URL (e.g. Neon free plan). Records survive every redeploy.
+- `GOOGLE_SERVICE_ACCOUNT_JSON` + `OUTPUT_DRIVE_FOLDER_ID`: files are mirrored to Drive → "Studio data" and restored
+  automatically. `/api/health` shows `database` and `file_mirror`.
