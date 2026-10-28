@@ -10,10 +10,37 @@ def _store() -> str:
     return (get_secret("SHOPIFY_STORE") or SHOPIFY_STORE or "").replace("https://", "").strip("/")
 
 
+_tok: dict = {}
+
+
+def _token(store: str) -> str:
+    """A permanent Admin API token (older custom apps) or, for Dev Dashboard apps (2026+), a 24-hour token from the
+    client credentials grant, renewed automatically."""
+    static = get_secret("SHOPIFY_ADMIN_TOKEN")
+    if static:
+        return static
+    cid, secret = get_secret("SHOPIFY_CLIENT_ID"), get_secret("SHOPIFY_CLIENT_SECRET")
+    if not (cid and secret):
+        return ""
+    import time
+    if _tok.get("token") and _tok.get("store") == store and _tok.get("exp", 0) > time.time() + 300:
+        return _tok["token"]
+    r = httpx.post(f"https://{store}/admin/oauth/access_token", timeout=30,
+                   data={"grant_type": "client_credentials", "client_id": cid, "client_secret": secret})
+    if r.status_code >= 400:
+        raise RuntimeError(f"Shopify refused the app credentials ({r.status_code}): {r.text[:200]}. "
+                           "Check the app is installed on this store and the scopes are released.")
+    j = r.json()
+    _tok.update(token=j["access_token"], store=store, exp=time.time() + int(j.get("expires_in", 86399)))
+    return _tok["token"]
+
+
 def _call(query: str, variables: dict | None = None) -> dict:
-    store, token = _store(), get_secret("SHOPIFY_ADMIN_TOKEN")
+    store = _store()
+    token = _token(store) if store else ""
     if not store or not token:
-        raise RuntimeError("Shopify not connected. Add SHOPIFY_STORE (your-store.myshopify.com) and SHOPIFY_ADMIN_TOKEN.")
+        raise RuntimeError("Shopify not connected. Add SHOPIFY_STORE (your-store.myshopify.com) plus SHOPIFY_CLIENT_ID "
+                           "and SHOPIFY_CLIENT_SECRET (Dev Dashboard app) in Admin → API & models.")
     r = httpx.post(f"https://{store}/admin/api/{SHOPIFY_API_VERSION}/graphql.json",
                    json={"query": query, "variables": variables or {}},
                    headers={"X-Shopify-Access-Token": token}, timeout=60)

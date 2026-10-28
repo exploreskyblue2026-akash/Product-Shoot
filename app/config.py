@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.2.1 (remove ✕ on queue rows)"
+APP_VERSION = "3.2.2 (Shopify Dev Dashboard login; master-sheet fixes)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

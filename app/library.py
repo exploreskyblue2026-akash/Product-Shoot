@@ -61,6 +61,7 @@ def import_master(s: Session, data: bytes, filename: str = "master.xlsx") -> dic
     wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     added = updated = 0
     tabs = []
+    _BRAND_WORDS.clear()
     for ws in wb.worksheets:
         rows = ws.iter_rows(values_only=True)
         try:
@@ -72,20 +73,30 @@ def import_master(s: Session, data: bytes, filename: str = "master.xlsx") -> dic
             continue
         tabs.append(ws.title)
         for r in rows:
-            pid = str(_cell(r, m.get("product_id"))).strip()
+            raw_pid = _cell(r, m.get("product_id"))
+            pid = str(int(raw_pid)) if isinstance(raw_pid, float) and raw_pid.is_integer() else str(raw_pid).strip()
             item = norm(_cell(r, m.get("item_code")))
             key = norm(pid) or item
             if not key:
                 continue
             ean = norm(_cell(r, m.get("ean")))
             p = s.scalar(select(LibProduct).where(LibProduct.key == key))
+            if not p and isinstance(raw_pid, float):        # stored earlier as '612324.0': rename, keep its photos/memory
+                p = s.scalar(select(LibProduct).where(LibProduct.key == key + "0"))
+                if p:
+                    for img in s.scalars(select(LibImage).where(LibImage.key == p.key)):
+                        img.key = key
+                    p.key = key
             if not p:
                 p = LibProduct(key=key)
                 s.add(p)
                 added += 1
             else:
                 updated += 1
-            p.product_id, p.item_code, p.ean = pid, item, ean
+            is_new = p.id is None
+            p.product_id = pid or p.product_id
+            p.item_code = item or p.item_code
+            p.ean = ean or p.ean
             extra = {}
             for ci, h in enumerate(head):
                 hl = str(h or "").strip().lower()
@@ -101,9 +112,13 @@ def import_master(s: Session, data: bytes, filename: str = "master.xlsx") -> dic
                 elif hl in ("hsn code",):
                     extra["hsn"] = str(v)
             p.data = {**(p.data or {}), **extra}
-            p.name = str(_cell(r, m.get("name"))).strip()[:300]
-            p.category = str(_cell(r, m.get("category"))).strip()[:80]
-            p.brand = ws.title.strip()[:80]
+            name = str(_cell(r, m.get("name"))).strip()[:300]
+            cat = str(_cell(r, m.get("category"))).strip()[:80]
+            p.name = name or p.name or ""                   # a bare list of codes (e.g. 'Sheet2') never blanks real data
+            p.category = cat or p.category or ""
+            label = _brand_label(s, ws.title, p.name)[:80]
+            if is_new or name or norm(label) in _BRAND_WORDS.get("words", {}):
+                p.brand = label if (name or is_new) else p.brand
     s.commit()
     log(s, "library", f"Master sheet {filename}: {added} new, {updated} updated products from tabs {', '.join(tabs)}")
     s.commit()
@@ -124,6 +139,33 @@ def focus_index(s: Session, idx: dict | None = None) -> dict:
 def _variants(key: str) -> set:
     """A code and its one-letter-off spellings (PPIP25RD ~ PIP25RD) for a quick 'is it on this page' test."""
     return {key} | {key[:i] + key[i + 1:] for i in range(len(key))} if len(key) >= 6 else {key}
+
+
+_BRAND_WORDS: dict = {}
+
+
+def _brand_label(s: Session, tab: str, name: str) -> str:
+    """Brand of a master-sheet row: the tab name when it's a brand (MILAN, TROIKA…); for mixed tabs (GIFT BOX…)
+    the brand found at the start of the product name ('MILAN CONIC TIP…' -> MILAN)."""
+    from .db import LibraryRow
+    if "words" not in _BRAND_WORDS:
+        words = {}
+        for r in s.scalars(select(LibraryRow).where(LibraryRow.table == "brands")):
+            d = r.data or {}
+            if r.key.startswith("_"):
+                continue
+            for w in [d.get("brand_name", "")] + str(d.get("detect_keywords", "")).split("|"):
+                if w.strip():
+                    words[norm(w)] = (d.get("brand_name") or r.key).upper()
+        _BRAND_WORDS["words"] = words
+    words = _BRAND_WORDS["words"]
+    if norm(tab) in words:
+        return tab.strip()
+    first = norm(" ".join((name or "").split()[:2]))
+    for w, label in words.items():
+        if w and (first.startswith(w) or norm((name or "").split()[0] if name else "") == w):
+            return label
+    return tab.strip()
 
 
 def _index(s: Session) -> dict[str, LibProduct]:
