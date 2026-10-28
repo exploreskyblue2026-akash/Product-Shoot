@@ -26,7 +26,7 @@
 .mode button{text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:8px 10px;cursor:pointer;min-width:0}
 .mode button[aria-checked="true"]{border-color:var(--azure);box-shadow:inset 0 0 0 1px var(--azure);background:var(--celeste-soft)}
 .mode b{display:block;font-size:13px}.mode small{display:block;font-size:11px;color:var(--muted);line-height:1.25}
-#queue .li[draggable="true"]{cursor:grab}#queue .li.dragging{opacity:.45;outline:2px dashed var(--azure)}
+#queue .qrow[draggable="true"] .li{cursor:grab}#queue .qrow.dragging{opacity:.45;outline:2px dashed var(--azure);border-radius:6px}
 .step-n{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:3px;background:var(--azure);color:var(--on-azure);font-size:11px;font-weight:800;margin-right:8px;vertical-align:1px}
 
 /* autopilot canvas block */
@@ -59,6 +59,9 @@
 /* lists */
 .list{display:flex;flex-direction:column;gap:6px}
 .li{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);text-align:left;width:100%}
+.qrow{display:flex;gap:4px;align-items:stretch}.qrow .li{flex:1;min-width:0}
+.qx{flex:none;width:30px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--muted);cursor:pointer;font-size:13px}
+.qx:hover:not(:disabled){color:var(--bad);border-color:var(--bad)}.qx:disabled{opacity:.35;cursor:not-allowed}
 button.li{cursor:pointer}button.li:hover{border-color:var(--azure)}
 .li .ic{width:30px;height:30px;border-radius:5px;background:var(--sunk);display:grid;place-items:center;color:var(--azure-text);font-size:11px;font-weight:800}
 .li .ic svg{width:16px;height:16px}
@@ -252,10 +255,10 @@ function renderLeft(){
   $("#repo-n").textContent=S.sources.length;
   $("#repos").innerHTML=S.sources.map(r=>`<div class="li"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${IC[r.type]||IC.url}</svg></span><span style="min-width:0"><b>${esc(r.name)}</b><small title="${esc(r.error||r.detail)}">${esc(r.status=="error"?"Error: "+r.error:r.status=="new"?"Scanning…":r.detail)}</small></span><span class="chip ${r.status=="error"?"bad":r.watch?"info":"mute"}">${r.count}${r.watch?" · watching":""}</span></div>`).join("")||'<div class="empty">No inputs yet</div>';
   const chip=q=>q.paused?'<span class="chip mute">Paused</span>':({gen:`<span class="chip info">${q.done}/${q.v2&&q.shots_wanted.length?q.shots_wanted.length:4}</span>`,review:'<span class="chip warn">Review</span>',error:'<span class="chip bad">Error</span>',needs_photo:'<span class="chip mute">No photo</span>'})[q.stage]||'<span class="chip mute">Waiting</span>';
-  $("#queue").innerHTML=S.queue.map(q=>li(q,chip(q))).join("")||'<div class="empty">Queue is empty. Add an input above.</div>';
+  $("#queue").innerHTML=S.queue.map(q=>`<div class="qrow" data-id="${q.id}"${q.stage!="gen"?' draggable="true" title="Drag to change priority"':""}>${li(q,chip(q))}<button type="button" class="qx" data-remove="${q.id}" aria-label="Remove ${esc(q.code)} from the queue" title="${q.stage=="gen"?"Generating: press Stop first":"Remove from queue"}"${q.stage=="gen"?" disabled":""}>✕</button></div>`).join("")||'<div class="empty">Queue is empty. Add an input above.</div>';
   $("#saved").innerHTML=S.saved.map(q=>li(q,'<span class="chip ok">Saved</span>')).join("")||'<div class="empty">Approved shots are saved here</div>';
   $("#admin-link").hidden=!(S.user.role=="admin"||S.user.role=="owner")}
-function li(q,extra){return `<button type="button" class="li${q.id===cur?" now":""}" data-id="${q.id}"${q.stage!="saved"&&q.stage!="gen"?' draggable="true" title="Drag to change priority"':""}><span class="ic">${esc((q.brand||q.code).slice(0,2).toUpperCase())}</span><span style="min-width:0"><b class="mono">${esc(q.code)}</b><small>${esc(q.name)}</small></span>${extra}</button>`}
+function li(q,extra){return `<button type="button" class="li${q.id===cur?" now":""}" data-id="${q.id}"><span class="ic">${esc((q.brand||q.code).slice(0,2).toUpperCase())}</span><span style="min-width:0"><b class="mono">${esc(q.code)}</b><small>${esc(q.name)}</small></span>${extra}</button>`}
 
 function renderStage(){
   if(!P){$("#p-code").textContent="—";$("#p-name").textContent="Add an input to start";$("#gallery").innerHTML="";$("#actions").innerHTML="";$("#qc").innerHTML="";$("#p-state").textContent="—";return}
@@ -285,7 +288,8 @@ async function act(kind){if(busy||!P)return;busy=true;try{
   if(kind=="skip"){const list=S.queue.filter(q=>q.id!==cur);cur=list.length?list[0].id:null;sel=0}
   await refresh()}catch(e){toast(e.message)}finally{busy=false}}
 
-document.addEventListener("click",e=>{
+document.addEventListener("click",async e=>{
+  const rm=e.target.closest("[data-remove]");if(rm){e.preventDefault();try{await api(`/api/products/${rm.dataset.remove}`,{method:"DELETE"});if(cur==+rm.dataset.remove){cur=null;P=null}toast("Removed from the queue");await refresh()}catch(x){toast(x.message)}return}
   const l=e.target.closest(".li[data-id]");if(l){cur=+l.dataset.id;sel=0;refresh();if(innerWidth<=900)$("#top").scrollIntoView({behavior:"smooth"});return}
   const sh=e.target.closest(".shot");if(sh){sel=+sh.dataset.shot;$("#gallery").dataset.sig="";renderStage();return}
   const a=e.target.closest("[data-act]");if(a&&!a.disabled)act(a.dataset.act)});
@@ -296,11 +300,11 @@ document.querySelectorAll(".mode [data-mode]").forEach(b=>b.addEventListener("cl
 $("#v2-load").addEventListener("click",async()=>{try{const r=await api("/api/v2/load-shoot",{method:"POST"});toast(`${r.total} codes: ${r.total-r.waiting-r.missing} ready to generate, ${r.waiting} waiting for photo/cut-out, ${r.missing} not in master`);await refresh()}catch(e){toast(e.message)}});
 // drag & drop priority in the queue
 (()=>{const box=$("#queue");let drag=null;
-  box.addEventListener("dragstart",e=>{drag=e.target.closest(".li");if(!drag)return;drag.classList.add("dragging");e.dataTransfer.effectAllowed="move"});
+  box.addEventListener("dragstart",e=>{drag=e.target.closest(".qrow");if(!drag)return;drag.classList.add("dragging");e.dataTransfer.effectAllowed="move"});
   box.addEventListener("dragend",async()=>{if(!drag)return;drag.classList.remove("dragging");drag=null;
-    const ids=[...box.querySelectorAll(".li")].map(x=>+x.dataset.id);
+    const ids=[...box.querySelectorAll(".qrow")].map(x=>+x.dataset.id);
     try{await api("/api/queue/order",{method:"POST",body:{ids}});toast("Queue order saved");await refresh()}catch(e){toast(e.message)}});
-  box.addEventListener("dragover",e=>{if(!drag)return;e.preventDefault();const over=e.target.closest(".li");if(!over||over===drag)return;
+  box.addEventListener("dragover",e=>{if(!drag)return;e.preventDefault();const over=e.target.closest(".qrow");if(!over||over===drag)return;
     const r=over.getBoundingClientRect();box.insertBefore(drag,(e.clientY-r.top)>r.height/2?over.nextSibling:over)});})();
 $("#stop-all").addEventListener("click",async()=>{try{await api("/api/stop",{method:"POST"});toast("Stopping: the current image finishes, nothing new starts");await refresh()}catch(e){toast(e.message)}});
 $("#o-approve").addEventListener("change",e=>setAuto({auto_approve:e.target.checked}));
