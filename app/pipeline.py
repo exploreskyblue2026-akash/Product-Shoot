@@ -47,7 +47,9 @@ def _model_for(s: Session, kind: str) -> tuple[str, str]:
     mode = get_setting(s, "cost_mode", "economy")
     hero_m, other_m, size = config.COST_MODES.get(mode, config.COST_MODES["economy"])
     pick = hero_m if kind in ("hero", "detail") else other_m
-    return config.model_name(config.mode_model(pick)), size
+    # the model boxes in Admin -> API & models are what "pro" and "fast" mean (blank = built-in default)
+    chosen = {"pro": get_setting(s, "model_hero_detail", ""), "fast": get_setting(s, "model_other", "")}.get(pick) or ""
+    return config.model_name(chosen.strip() or config.mode_model(pick)), size
 
 
 def shot_card(s: Session, p: Product, kind: str) -> dict:
