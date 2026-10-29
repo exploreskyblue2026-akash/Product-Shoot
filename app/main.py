@@ -773,7 +773,7 @@ class LinkIn(BaseModel):
 
 @app.post("/api/library/scan")
 def library_scan(body: LinkIn, u=Depends(need("editor"))):
-    _bg("Drive scan", lambda s: library.scan_drive(s, body.link))
+    _bg("Drive scan", lambda s: library.scan_drive(s, body.link, reread=True))
     return {"ok": True}
 
 

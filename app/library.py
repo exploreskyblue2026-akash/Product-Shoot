@@ -453,7 +453,7 @@ def add_catalogue(s: Session, pdf: bytes, filename: str, idx=None) -> int:
 
 
 # ------------------------------------------------------------------ Drive
-def scan_drive(s: Session, link: str) -> dict:
+def scan_drive(s: Session, link: str, reread: bool = False) -> dict:
     """Scan a Drive folder (or the whole Shared drive): sheets, PDFs and images. Final output / Cutouts library skipped."""
     from .connectors import google
     svc, root = google.drive(), google.folder_id(link)
@@ -505,12 +505,15 @@ def scan_drive(s: Session, link: str) -> dict:
     focused = len(idx) < len(_index(s))
     stats["skipped_not_in_sheet"] = 0
     for f in files:
-        if f["id"] in known:
+        low = f["name"].lower()
+        if f["id"] in known and not (low.endswith(".pdf") and (loaded or reread)):
             stats["already"] += 1
             continue
-        low = f["name"].lower()
-        if low.endswith(".pdf"):
+        if low.endswith(".pdf"):                       # catalogues are re-read when the sheet changed (new codes)
             stats["catalogue_images"] += add_catalogue(s, google.download(f["id"]), f["name"], idx=idx)
+            if f["id"] in known:
+                s.commit()
+                continue
             s.add(LibImage(key="", source="marker", drive_id=f["id"], cut_status="skip", src_name=f["name"]))
         elif f["mimeType"].startswith("image/") or low.endswith(IMG_EXT):
             p = key_from_name(f["path"], idx)
