@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.3.2 (fix: approval buttons missing)"
+APP_VERSION = "3.3.3 (approval fix; Max mode: Pro model for all 4 shots)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
@@ -45,6 +45,7 @@ COST_MODES = {
     "economy":  ("lite", "lite", "1K"),
     "standard": ("fast", "fast", "1K"),
     "premium":  ("pro", "fast", "2K"),
+    "max":      ("pro", "pro", "2K"),
 }
 
 
