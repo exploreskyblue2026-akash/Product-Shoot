@@ -48,6 +48,9 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
 .un .card input{font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);width:100%}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9;max-width:90vw}
 .toast.on{opacity:1}
+.kitbox{border-top:1px solid var(--line);padding-top:8px;display:flex;flex-direction:column;gap:6px}
+.kitrow{display:grid;grid-template-columns:1fr 1fr;gap:8px}.kitrow figure{margin:0;display:flex;flex-direction:column;gap:4px}
+.kitrow img{width:100%;aspect-ratio:1;object-fit:contain;background:var(--sunk);border-radius:6px}.kitrow figcaption{font-size:12px;color:var(--muted)}
 .mem{border-top:1px solid var(--line);padding-top:8px}.mem summary{cursor:pointer;display:flex;gap:6px;align-items:center;font-size:13px}
 .memf{display:grid;gap:6px;margin-top:8px}.memf .field input{min-height:32px;padding:5px 8px;font-size:13px}
 .empty{color:var(--muted);font-size:14px;padding:12px 0}
@@ -118,6 +121,11 @@ function render(){
   $("#un").innerHTML=D.unmatched.slice(0,120).map(u=>`<div class="card"><div class="pic"><img src="${esc(u.src)}" alt="" loading="lazy"></div><div class="nm" title="${esc(u.name)}">${esc(u.name)}</div>
     <input aria-label="Product code" placeholder="Product code" value="${esc((u.name.match(/codes on page: ([^,)]+)/)||[])[1]||"")}" data-code="${u.id}"><div class="acts"><button class="btn sm primary" data-assign="${u.id}" type="button">Assign</button><button class="btn sm" data-act="discard" data-id="${u.id}" type="button">Discard</button></div></div>`).join("")||'<div class="empty">Nothing unmatched.</div>';
 }
+function kit(r){const k=r.kit||{missing:[],pending:[],real_angles:[]};const pend=(r.all||[]).filter(i=>i.kit=="pending");
+  const appr=(r.all||[]).filter(i=>i.kit=="approved");
+  return `<div class="kitbox"><div class="hint"><b>Product Kit</b> · real angles: ${k.real_angles.length?esc(k.real_angles.join(", ")):"not tagged yet"}${appr.length?` · approved AI views: ${appr.map(i=>esc(i.angle)).join(", ")}`:""}</div>
+  ${pend.length?`<div class="kitrow">${pend.map(i=>`<figure><img src="${esc(i.src)}" alt="AI ${esc(i.angle)} view"><figcaption>${esc(i.angle)} view</figcaption><div class="acts"><button class="btn sm primary" data-act="kit_approve" data-id="${i.id}" type="button">✓ Same product</button><button class="btn sm danger" data-act="kit_reject" data-id="${i.id}" type="button">✕ Not right</button></div></figure>`).join("")}</div>`:""}
+  ${!pend.length&&k.missing.length?`<div class="acts"><button class="btn sm" data-kit="${esc(r.key)}" type="button" title="AI makes the missing views once; you approve them">Make ${k.missing.map(esc).join(" + ")} view${k.missing.length>1?"s":""} (≈ ₹${2*k.missing.length}, once)</button></div>`:""}</div>`}
 const MF=[["summary","Product"],["text","Exact text / logo"],["colours","Colours"],["shape","Shape & proportions"],["parts","Parts & counts"],["material","Material & finish"],["size","Real size"],["must_keep","Must never change"],["watch","Watch out (past mistakes)"]];
 function mem(r){const m=r.memory||{},f=m.facts;
   if(!f)return `<div class="acts"><button class="btn sm" data-study="${esc(r.key)}" type="button">Study product (≈ ₹0.3, once)</button></div>`;
@@ -131,6 +139,7 @@ function card(r){const s=ST[r.status]||["mute",r.status], p=r.primary;
   ${r.all&&r.all.length>1?`<div class="thumbs" aria-label="Other photos">${r.all.map(i=>`<button type="button" aria-pressed="${i.primary}" data-act="primary" data-id="${i.id}" title="Use this photo (${i.w}×${i.h}${i.angle?" · "+i.angle:""}${i.flags&&i.flags.length?" · "+i.flags.join(", "):""})"><img src="${esc(i.src)}" alt=""></button>`).join("")}</div>`:""}
   ${r.notes?`<div class="note">${esc(r.notes)}</div>`:""}${r.in_shoot?`<div class="hint">Shots: ${r.shots.length?r.shots.join(", "):"default"}${r.note?" · "+esc(r.note):""}</div>`:""}
   ${r.status=="low_quality"&&p?`<div class="acts"><button class="btn sm" data-act="use_anyway" data-id="${p.id}" type="button">Use anyway</button></div>`:""}
+  ${p&&!D.cutouts?kit(r):""}
   ${p&&!D.cutouts?mem(r):""}
   ${p&&!D.cutouts?`<div class="acts"><button class="btn sm danger" data-act="skip" data-id="${p.id}" type="button" title="Don't use this photo">✕ Don't use this photo</button></div>`:""}
   ${p&&D.cutouts&&p.cut?`<div class="acts"><button class="btn sm" data-act="ok" data-id="${p.id}" type="button">✓ OK</button><button class="btn sm" data-act="redo" data-id="${p.id}" type="button">↻ Redo</button><button class="btn sm danger" data-act="skip" data-id="${p.id}" type="button">✕ Skip</button></div>`:""}</article>`}
@@ -138,6 +147,7 @@ function card(r){const s=ST[r.status]||["mute",r.status], p=r.primary;
 document.addEventListener("click",async e=>{
   const f=e.target.closest("[data-f]"); if(f){filter=f.dataset.f;render();return}
   const a=e.target.closest("[data-act]"); if(a){try{await api(`/api/library/images/${a.dataset.id}`,{method:"POST",body:{action:a.dataset.act}});await load();kick()}catch(x){toast(x.message)}return}
+  const kb=e.target.closest("[data-kit]"); if(kb){try{await api(`/api/library/products/${encodeURIComponent(kb.dataset.kit)}/kit`,{method:"POST"});toast("Making the extra views…");poll()}catch(x){toast(x.message)}return}
   const st=e.target.closest("[data-study]"); if(st){try{await api(`/api/library/products/${encodeURIComponent(st.dataset.study)}/study`,{method:"POST"});toast("Studying the product…");poll()}catch(x){toast(x.message)}return}
   const ms=e.target.closest("[data-msave],[data-mapprove]"); if(ms){const box=ms.closest(".memf"),facts={};box.querySelectorAll("[data-mk]").forEach(i=>{facts[i.dataset.mk]=i.dataset.list=="true"?i.value.split("|").map(x=>x.trim()).filter(Boolean):i.value});
     const body={facts}; if(ms.dataset.mapprove!==undefined)body.approved=ms.dataset.mapprove=="1";

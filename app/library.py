@@ -342,7 +342,7 @@ def pick_primary(s: Session, key: str, force_id: int | None = None):
     cur = next((i for i in imgs if i.primary), None)
     best = next((i for i in imgs if i.id == force_id), None)
     if best is None:
-        usable = [i for i in imgs if i.cut_status != "skip"] or imgs
+        usable = [i for i in imgs if i.cut_status != "skip" and i.source != "kit"] or [i for i in imgs if i.source != "kit"] or imgs
         good = [i for i in usable if not (i.meta or {}).get("flags")] or usable
         best = cur if cur and cur.cut_status in ("ok", "check") else max(good, key=lambda i: (i.w * i.h) * (2 if (i.meta or {}).get("angle") == "front" else 1))
     for i in imgs:
@@ -638,7 +638,8 @@ def report(s: Session) -> dict:
                      "primary": _img(prim) if prim else None, "notes": notes,
                      "shots": (sh or {}).get("shots", []), "note": (sh or {}).get("note", ""),
                      "priority": (sh or {}).get("priority"), "match": (sh or {}).get("match", ""),
-                     "all": [_img(i) for i in live], "memory": mem})
+                     "all": [_img(i) for i in live], "memory": mem,
+                     "kit": kit_status(s, k) if live else {"missing": [], "pending": [], "real_angles": []}})
     unmatched = [_img(i) for i in by.get("", []) if i.dup_of is None]
     counts = {}
     for r in rows:
@@ -649,9 +650,54 @@ def report(s: Session) -> dict:
 
 def refs_with_angles(s: Session, key: str, limit: int = 4) -> list[dict]:
     live = [i for i in s.scalars(select(LibImage).where(LibImage.key == key, LibImage.dup_of.is_(None),
-                                                         LibImage.cut_status != "skip"))]
-    live.sort(key=lambda i: (not i.primary, bool((i.meta or {}).get("flags")), -(i.w * i.h)))
+                                                         LibImage.cut_status != "skip"))
+            if (i.meta or {}).get("kit") in (None, "approved")]
+    live.sort(key=lambda i: (not i.primary, i.source == "kit", bool((i.meta or {}).get("flags")), -(i.w * i.h)))
     return [{"path": i.path, "angle": (i.meta or {}).get("angle", ""), "id": i.id} for i in live[:limit]]
+
+
+KIT_ANGLES = ("angle", "side")
+
+
+def kit_status(s: Session, key: str) -> dict:
+    imgs = [i for i in s.scalars(select(LibImage).where(LibImage.key == key, LibImage.dup_of.is_(None),
+                                                         LibImage.cut_status != "skip"))]
+    real = {(i.meta or {}).get("angle") for i in imgs if i.source != "kit"}
+    kit = [i for i in imgs if i.source == "kit"]
+    have = real | {(i.meta or {}).get("angle") for i in kit if (i.meta or {}).get("kit") == "approved"}
+    return {"missing": [a for a in KIT_ANGLES if a not in have],
+            "pending": [i.id for i in kit if (i.meta or {}).get("kit") == "pending"],
+            "real_angles": sorted(a for a in real if a)}
+
+
+def build_kit(s: Session, key: str, prov, model: str, size: str = "1K") -> dict:
+    """Make the missing reference angles (45°, side) from the real photos; each waits for a person's approval."""
+    from . import engine
+    st = kit_status(s, key)
+    todo = [a for a in st["missing"] if a not in {(s.get(LibImage, i).meta or {}).get("angle") for i in st["pending"]}]
+    if not todo:
+        return {"made": 0, "cost": 0.0}
+    refs = refs_with_angles(s, key, 4)
+    if not refs:
+        raise ValueError("No photo for this product")
+    p = s.scalar(select(LibProduct).where(LibProduct.key == key))
+    from .dataset import memory_block
+    mem = ((p.data or {}).get("memory") or {}) if p else {}
+    facts = memory_block(mem).split("\n", 1)[-1].replace("\n", "; ") if mem.get("facts") else ""
+    main = storage.read(refs[0]["path"])
+    extra = [storage.read(r["path"]) for r in refs[1:3]]
+    made, cost = 0, 0.0
+    from . import config
+    for a in todo:
+        data = prov.generate(engine.kit_prompt(a, facts), main, model, size, refs=extra)
+        im = Image.open(io.BytesIO(data))
+        rel = storage.save(f"library/kit/{storage.safe(key)}/{a}-{len(st['pending']) + made + 1}.png", data)
+        s.add(LibImage(key=key, source="kit", src_name=f"AI {a} view", path=rel, w=im.width, h=im.height,
+                       phash=dhash(im), meta={"angle": a, "kit": "pending"}, cut_status="pending"))
+        made += 1
+        cost += config.image_cost(model, size)
+    s.commit()
+    return {"made": made, "cost": cost}
 
 
 MEMORY_SCHEMA = {
@@ -741,7 +787,8 @@ def _img(i: LibImage) -> dict:
     return {"id": i.id, "src": f"/files/{i.path}", "cut": f"/files/{i.cut_path}" if i.cut_path else "",
             "w": i.w, "h": i.h, "status": i.cut_status, "note": i.cut_note, "name": i.src_name,
             "source": i.source, "primary": i.primary, "angle": (i.meta or {}).get("angle", ""),
-            "flags": (i.meta or {}).get("flags", []), "sharpness": (i.meta or {}).get("sharpness")}
+            "flags": (i.meta or {}).get("flags", []), "sharpness": (i.meta or {}).get("sharpness"),
+            "kit": (i.meta or {}).get("kit", "")}
 
 
 def report_csv(s: Session) -> str:

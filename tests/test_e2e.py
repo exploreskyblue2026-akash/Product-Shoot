@@ -358,7 +358,7 @@ def test_shoot_sheet_with_original_photos():
     from app.providers import mock
     c = client()
     c.put("/api/admin/settings", json={"library_cutouts": False, "max_cost_product": 5, "daily_budget": 100,
-                                       "default_shots": [1, 2, 3, 4], "hero_gate": False})
+                                       "default_shots": [1, 2, 3, 4], "hero_gate": False, "engine_mode": "classic"})
     c.post("/api/library/clear")
     LIB = Path(__file__).parent / "library"
     def photo(color, size=1200, side=False):
@@ -488,7 +488,8 @@ def test_product_memory_quality_gate_and_learning():
     c = client()
     c.post("/api/library/clear")
     c.put("/api/admin/settings", json={"library_cutouts": False, "max_cost_product": 5, "daily_budget": 100,
-                                       "default_shots": [1, 2], "hero_gate": False, "retries": 0, "qc_mode": "light"})
+                                       "default_shots": [1, 2], "hero_gate": False, "retries": 0, "qc_mode": "light",
+                                       "engine_mode": "classic"})
     LIB = Path(__file__).parent / "library"
     def photo(color, size=1400, blur=0):
         im = Image.new("RGB", (size, size), (250, 250, 250))
@@ -618,3 +619,98 @@ def test_brand_workspace_queue_and_order():
     with SessionLocal() as s:
         assert {p.key for p in focus_index(s).values()} >= {"PEN20SI", "TRV20GY"}   # Library scans brand-queue products
     c.post("/api/autopilot", json={"pipeline_mode": "v1"})
+
+
+
+def test_accuracy_engine_keeps_real_product():
+    """Accurate mode: hero/use case/lifestyle edit the real photo and restore its pixels; detail crops when big enough;
+    a photo without a plain background falls back to fresh generation; QC is skipped only for exact shots."""
+    import io, time, openpyxl
+    from PIL import Image, ImageDraw
+    from app.providers import mock
+    c = client()
+    c.post("/api/library/clear")
+    c.put("/api/admin/settings", json={"engine_mode": "accurate", "library_cutouts": False, "max_cost_product": 5,
+                                       "daily_budget": 100, "default_shots": [1, 2, 3, 4], "hero_gate": False, "retries": 0})
+    LIB = Path(__file__).parent / "library"
+    def photo(size=1800, busy=False):
+        im = Image.new("RGB", (size, size), (248, 248, 248))
+        d = ImageDraw.Draw(im)
+        if busy:                                              # product already in a scene: no plain background
+            import random
+            r = random.Random(3)
+            for _ in range(500):
+                x, y = r.randrange(size), r.randrange(size)
+                d.rectangle([x, y, x + size // 10, y + size // 10], fill=(r.randrange(255), r.randrange(255), r.randrange(255)))
+        d.rectangle([size * 3 // 10, size // 5, size * 7 // 10, size * 4 // 5], fill=(20, 60, 200))
+        d.text((size // 2 - 40, size // 2), "TROIKA", fill=(255, 255, 255))
+        for i in range(0, 60, 6):
+            d.line([(size * 3 // 10 + 20, size // 4 + i * 8), (size * 7 // 10 - 20, size // 4 + i * 8)], fill=(200, 220, 255))
+        b = io.BytesIO(); im.save(b, "JPEG", quality=95); return b.getvalue()
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["SHOOT", "SHOTS"]); ws.append(["BBG64/GY", ""]); ws.append(["BBL64/BK", "1"])
+    b = io.BytesIO(); wb.save(b)
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "x/y")),
+                                         ("files", ("eng_shoot.xlsx", b.getvalue(), "x/y")),
+                                         ("files", ("BBG64-GY front.jpg", photo(), "image/jpeg")),
+                                         ("files", ("BBL64-BK scene.jpg", photo(busy=True), "image/jpeg"))])
+    wait_job(c)
+    calls = {"edit": 0, "generate": 0, "qc": 0}
+    oe, og, oq = mock.MockProvider.edit, mock.MockProvider.generate, mock.MockProvider.qc
+    def e(self, *a, **k): calls["edit"] += 1; return oe(self, *a, **k)
+    def g(self, *a, **k): calls["generate"] += 1; return og(self, a[0], a[1], a[2], a[3] if len(a) > 3 else "1K")
+    def q(self, *a, **k): calls["qc"] += 1; return oq(self, *a, **k)
+    mock.MockProvider.edit, mock.MockProvider.generate, mock.MockProvider.qc = e, g, q
+    try:
+        c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": True, "auto_approve": False})
+        c.post("/api/v2/load-shoot")
+        while pipeline.tick():
+            pass
+    finally:
+        mock.MockProvider.edit, mock.MockProvider.generate, mock.MockProvider.qc = oe, og, oq
+        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+    c.post("/api/autopilot", json={"pipeline_mode": "v2"})
+    st = c.get("/api/state").json()
+    allp = {x["code"]: x for x in st["queue"] + st["saved"]}
+    bl = c.get(f"/api/products/{allp['BBG64/GY']['id']}").json()
+    hows = {s["kind"]: s["qc"].get("how", {}) for s in bl["shots"] if s["image"]}
+    assert hows["hero"]["method"] == "edit" and hows["hero"]["exact"] is True
+    assert hows["detail"]["method"] == "crop" and hows["detail"]["exact"] is True
+    assert hows["use_case"]["method"] == "edit" and hows["lifestyle"]["method"] == "edit_zoom"
+    ye = c.get(f"/api/products/{allp['BBL64/BK']['id']}").json()
+    assert ye["shots"][0]["qc"]["how"]["method"] == "fresh"           # busy background -> fresh generation
+    assert calls["edit"] == 3 and calls["generate"] == 1               # detail crop needed no AI at all
+    assert calls["qc"] == 1                                            # only the fresh shot needed AI QC
+    img = c.get(bl["shots"][0]["image"]).content
+    assert Image.open(io.BytesIO(img)).size == (1200, 1500)
+    c.post("/api/autopilot", json={"pipeline_mode": "v1"})
+
+
+def test_product_kit_angles_need_approval():
+    import io
+    from PIL import Image, ImageDraw
+    c = client()
+    LIB = Path(__file__).parent / "library"
+    im = Image.new("RGB", (1600, 1600), (250, 250, 250)); ImageDraw.Draw(im).ellipse([500, 400, 1100, 1200], fill=(200, 30, 30))
+    b = io.BytesIO(); im.save(b, "JPEG")
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "x/y")),
+                                         ("files", ("KR18-05-BR.jpg", b.getvalue(), "image/jpeg"))])
+    wait_job(c)
+    row = next(r for r in c.get("/api/library").json()["rows"] if r["code"] == "KR18-05/BR")
+    assert set(row["kit"]["missing"]) == {"angle", "side"}
+    assert c.post(f"/api/library/products/{row['key']}/kit").json()["ok"]
+    wait_job(c)
+    row = next(r for r in c.get("/api/library").json()["rows"] if r["code"] == "KR18-05/BR")
+    pend = [i for i in row["all"] if i["kit"] == "pending"]
+    assert len(pend) == 2 and row["primary"]["kit"] == ""                      # a real photo stays the main one
+    from app.db import SessionLocal
+    from app.library import refs_with_angles
+    with SessionLocal() as s:
+        assert all(r["angle"] not in ("angle", "side") for r in refs_with_angles(s, row["key"]))   # unapproved: unused
+    c.post(f"/api/library/images/{pend[0]['id']}", json={"action": "kit_approve"})
+    c.post(f"/api/library/images/{pend[1]['id']}", json={"action": "kit_reject"})
+    with SessionLocal() as s:
+        angles = {r["angle"] for r in refs_with_angles(s, row["key"])}
+    assert pend[0]["angle"] in angles and pend[1]["angle"] not in angles
+    row = next(r for r in c.get("/api/library").json()["rows"] if r["code"] == "KR18-05/BR")
+    assert row["kit"]["missing"] == [pend[1]["angle"]] and not row["kit"]["pending"]

@@ -578,7 +578,7 @@ def test_conn(what: str, u=Depends(need("admin"))):
     raise HTTPException(404)
 
 
-SETTING_KEYS = ["library_autoscan", "library_focus", "library_drive_copy", "library_cutouts", "pipeline_mode", "scene_strategy", "scene_reuse", "fresh_brands", "auto_approve", "retries", "publish_shopify", "budget_month", "budget_action", "model_hero_detail",
+SETTING_KEYS = ["engine_mode", "library_autoscan", "library_focus", "library_drive_copy", "library_cutouts", "pipeline_mode", "scene_strategy", "scene_reuse", "fresh_brands", "auto_approve", "retries", "publish_shopify", "budget_month", "budget_action", "model_hero_detail",
                 "model_other", "file_naming", "min_raw_px", "output_drive_folder", "cost_mode", "default_shots",
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr"]
 
@@ -823,6 +823,11 @@ def library_image(iid: int, body: ImgAct, u=Depends(need("editor"))):
             except ValueError as e:
                 raise HTTPException(400, str(e))
             log(s, u.email, f"Library: image {iid} assigned to {key}")
+        elif body.action in ("kit_approve", "kit_reject"):
+            img.meta = {**(img.meta or {}), "kit": "approved" if body.action == "kit_approve" else "rejected"}
+            if body.action == "kit_reject":
+                img.cut_status = "skip"
+            log(s, u.email, f"Product Kit {img.key}: {(img.meta or {}).get('angle')} view {'approved' if body.action == 'kit_approve' else 'rejected'}")
         elif body.action == "use_anyway":
             img.meta = {**(img.meta or {}), "override": True}
         elif body.action == "discard":
@@ -1222,3 +1227,22 @@ def _autoscan_loop():
 
 if config.RUN_WORKER:
     threading.Thread(target=_autoscan_loop, daemon=True, name="library-autoscan").start()
+
+
+
+# ---------------------------------------------------------------- Product Kit
+@app.post("/api/library/products/{key}/kit")
+def kit_build(key: str, u=Depends(need("editor"))):
+    """Generate the missing reference angles for one product (≈ ₹2 each, once); they wait for approval."""
+    from .providers import get_provider
+    from .pipeline import _model_for
+
+    def run(s):
+        model, size = _model_for(s, "hero")
+        r = library.build_kit(s, key, get_provider(), model, size)
+        if r["cost"]:
+            s.add(Usage(product_id=None, kind="kit", model=model, cost=r["cost"]))
+            s.commit()
+        return f"{r['made']} view(s) to approve"
+    _bg(f"Product Kit for {key}", run)
+    return {"ok": True}

@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.2.2 (Shopify Dev Dashboard login; master-sheet fixes)"
+APP_VERSION = "3.3.0 (accuracy engine: edit real photo + restore, detail crop, Product Kit)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

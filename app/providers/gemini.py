@@ -216,3 +216,29 @@ def _scene(self, prompt: str, model: str, size: str = IMAGE_SIZE) -> bytes:
 
 
 GeminiProvider.generate_scene = _scene
+
+
+def _edit(self, image: bytes, instruction: str, model: str, size: str = IMAGE_SIZE, refs: list | None = None,
+          style: bytes | None = None) -> bytes:
+    """Edit the given image (the real product on a 4:5 canvas). Extra product angles may follow as references,
+    a style image last. The instruction says what must stay and what to change."""
+    parts = [types.Part.from_bytes(data=image, mime_type=_mime(image))]
+    lead = "The FIRST image is the photo to edit. "
+    for extra in (refs or [])[:3]:
+        parts.append(types.Part.from_bytes(data=extra, mime_type=_mime(extra)))
+    if refs:
+        lead += "The next images show the SAME real product from other angles, for reference only. "
+    if style:
+        parts.append(types.Part.from_bytes(data=style, mime_type=_mime(style)))
+        lead += "The LAST image is a style reference only (light, mood, colours); copy nothing from it. "
+    r = self._call(model_name(model), "image", contents=parts + [lead + instruction],
+                   config=types.GenerateContentConfig(response_modalities=["IMAGE"],
+                                                      image_config=types.ImageConfig(aspect_ratio="4:5", image_size=size)))
+    for cand in r.candidates or []:
+        for part in (cand.content.parts if cand.content else []) or []:
+            if part.inline_data and part.inline_data.data:
+                return part.inline_data.data
+    raise RuntimeError("Model returned no edited image")
+
+
+GeminiProvider.edit = _edit

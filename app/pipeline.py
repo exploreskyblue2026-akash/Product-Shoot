@@ -50,6 +50,50 @@ def _model_for(s: Session, kind: str) -> tuple[str, str]:
     return config.model_name(config.mode_model(pick)), size
 
 
+def shot_card(s: Session, p: Product, kind: str) -> dict:
+    """The brand's settings for this shot (method, pose, scene, props, extra prompt), if the brand has any."""
+    row = library(s, "brands").get(p.brand_id) or {}
+    return ((row.get("shots") or {}).get(kind) or {}) if (row.get("shots") or {}).get(kind, {}).get("mode") == "custom" else {}
+
+
+def _render_accurate(s, p, sh, spec, prov, model, size, refs, style, angle_raw, facts, correction, fallback_raw):
+    """One shot with the accuracy engine. Returns (final jpeg, how)."""
+    from . import engine
+    card = shot_card(s, p, sh.kind)
+    method, src_rel = engine.plan(sh.kind, angle_raw, card)
+    src = storage.read(src_rel) if src_rel else fallback_raw
+    how = {"method": method}
+    if method == "crop":
+        out, why = engine.detail_crop(src)
+        if out:
+            sh.model = "real photo (crop)"
+            return storage.to_output(out), {"method": "crop", "exact": True}
+        method, how = "edit", {"method": "edit", "note": why}
+    if method in ("edit", "edit_zoom"):
+        layout = {"edit_zoom": "lifestyle"}.get(method, sh.kind)
+        placed = engine.place(src, layout)
+        if placed["ok"]:
+            import io as _io
+            buf = _io.BytesIO()
+            placed["canvas"].save(buf, "PNG")
+            spec = {**spec, "fill": {**spec.get("fill", {}), "memory_text": facts}}
+            instr = engine.edit_prompt(spec, sh.kind, card) + (f"\n\nCORRECTION: {correction.split('Fix:')[-1].strip()}" if "Fix:" in correction else "")
+            gen = prov.edit(buf.getvalue(), instr, model, size, refs=refs[:2], style=style)
+            used = getattr(prov, "last_model", None) or model
+            sh.model, sh.prompt = used, instr
+            _charge(s, p, "image", used, config.image_cost(used, size), sh)
+            out, info = engine.restore(gen, placed)
+            return storage.to_output(out), {"method": method, "exact": info["restored"], "drift": info["drift"],
+                                            "upscaled": placed["upscaled"], **({"note": how["note"]} if how.get("note") else {})}
+        how = {"method": "fresh", "note": placed["reason"]}
+    prompt = spec["prompt"] + (("\n\n" + correction.split("[CORRECTION", 1)[-1]) if correction else "")
+    img = storage.to_output(prov.generate(prompt, src, model, size, refs=refs, style=style))
+    used = getattr(prov, "last_model", None) or model
+    sh.model = used
+    _charge(s, p, "image", used, config.image_cost(used, size), sh)
+    return img, {**how, "method": "fresh"}
+
+
 def style_reference(s: Session, p: Product) -> bytes | None:
     """One approved 'golden' shot: the brand's, or for unbranded / no-profile products the category's."""
     from .dataset import is_unbranded
@@ -130,6 +174,7 @@ def process(pid: int, only: list[int] | None = None):
             from .v2 import requested_shots
             defaults = requested_shots(s, p)
         style = style_reference(s, p)
+        accurate = bool((p.data or {}).get("lib_key")) and get_setting(s, "engine_mode", "accurate") == "accurate"
         angle_raw = {}
         if (p.data or {}).get("lib_key"):
             from . import library as lib
@@ -187,18 +232,27 @@ def process(pid: int, only: list[int] | None = None):
                     stop_reason = f"Stopped at the ${cap:.2f} per-product cost limit"
                     break
                 sh.attempts = (sh.attempts or 0) + 1
-                img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=refs, style=style))
-                used = getattr(prov, "last_model", None) or model     # may differ after a fallback
-                sh.model = used
-                _charge(s, p, "image", used, config.image_cost(used, size), sh)
+                how = {"method": "fresh"}
+                if accurate:
+                    img, how = _render_accurate(s, p, sh, spec, prov, model, size, refs, style, angle_raw, facts,
+                                                prompt if attempt else "", shot_raw)
+                else:
+                    img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=refs, style=style))
+                    used = getattr(prov, "last_model", None) or model     # may differ after a fallback
+                    sh.model = used
+                    _charge(s, p, "image", used, config.image_cost(used, size), sh)
                 rel = storage.save(f"shots/{storage.safe(p.code)}/{no}-{sh.kind}-a{sh.attempts}.jpg", img)
-                try:
-                    result = prov.qc(shot_raw, img, {"kind": sh.kind, "no": no, "facts": facts}, rv.data)
-                    _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
-                except Exception as e:                   # keep the image; a person checks it instead
-                    print(f"[pipeline] QC failed for {p.code} shot {no}: {e}")
-                    result = {"checks": {}, "reasons": {"qc": f"Automatic QC unavailable: {str(e)[:200]}"},
-                              "unchecked": True}
+                if how.get("exact"):                     # real product pixels: shape and text cannot have drifted
+                    result = {"checks": {"product_exact": True}, "reasons": {}, "how": how}
+                else:
+                    try:
+                        result = prov.qc(shot_raw, img, {"kind": sh.kind, "no": no, "facts": facts}, rv.data)
+                        _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
+                    except Exception as e:               # keep the image; a person checks it instead
+                        print(f"[pipeline] QC failed for {p.code} shot {no}: {e}")
+                        result = {"checks": {}, "reasons": {"qc": f"Automatic QC unavailable: {str(e)[:200]}"},
+                                  "unchecked": True}
+                    result["how"] = how
                 sh.image_path, sh.qc = rel, result
                 s.commit()
                 if result.get("unchecked") or _passed(result, qc_mode):

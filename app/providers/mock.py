@@ -65,3 +65,22 @@ def _study(self, images: list, ctx: dict) -> dict:
 
 
 MockProvider.study = _study
+
+
+def _edit(self, image: bytes, instruction: str, model: str, size: str = "1K", refs=None, style=None) -> bytes:
+    """Offline stand-in for an image edit: new background, product untouched (what a good edit should do)."""
+    from .. import engine
+    im = Image.open(io.BytesIO(image)).convert("RGB")
+    mask, _ = engine.product_mask(im)
+    bg = Image.new("RGB", im.size, (226, 218, 205))
+    d = ImageDraw.Draw(bg)
+    for y in range(int(im.height * 0.7), im.height, 4):
+        d.line([(0, y), (im.width, y)], fill=(205, 194, 178))
+    out = Image.composite(im, bg, mask) if mask is not None else im
+    out = out.resize((928, 1160))                       # models answer at their own size
+    b = io.BytesIO()
+    out.save(b, "JPEG", quality=88)
+    return b.getvalue()
+
+
+MockProvider.edit = _edit
