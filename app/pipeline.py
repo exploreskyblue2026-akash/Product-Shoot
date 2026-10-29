@@ -89,6 +89,10 @@ def _render_accurate(s, p, sh, spec, prov, model, size, refs, style, angle_raw, 
                                             "upscaled": placed["upscaled"], **({"note": how["note"]} if how.get("note") else {})}
         how = {"method": "fresh", "note": placed["reason"]}
     prompt = spec["prompt"] + (("\n\n" + correction.split("[CORRECTION", 1)[-1]) if correction else "")
+    cl = [f"{lbl}: {card[k]}" for k, lbl in (("scene", "Scene"), ("background", "Background / surface"), ("props", "Props"),
+                                              ("pose", "Hands / people / pose"), ("extra", "Extra")) if card.get(k)]
+    if cl:
+        prompt += "\n\n[BRAND SHOT CARD: follow this over the generic scene above]\n" + "\n".join(cl)
     img = storage.to_output(prov.generate(prompt, src, model, size, refs=refs, style=style))
     used = getattr(prov, "last_model", None) or model
     sh.model = used

@@ -82,6 +82,10 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
 .item b{font-family:var(--f-mono,monospace);font-size:12px}.item small{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .item .x{border:0;background:none;cursor:pointer;color:var(--muted);font-size:16px}
 .item .add{border:1px solid var(--line);background:var(--surface);border-radius:6px;cursor:pointer;font-size:12px;padding:3px 8px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.card{border:1px solid var(--line,#2a3140);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.card h3{margin:0;font-size:14px}.card label{display:flex;flex-direction:column;gap:4px;font-size:12px}
+.card input,.card select,.card textarea{width:100%}
 </style>
 </head>
 <body>
@@ -109,6 +113,12 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
       <div class="two" id="fields"></div>
       <div style="margin-top:12px"><div class="hint" style="margin-bottom:6px">Golden shots (max 3): the AI copies their light and mood, never their objects</div>
         <div class="gold" id="gold"></div></div>
+    </section>
+
+    <section class="panel" style="grid-column:1/-1">
+      <div class="panel-h"><h2>Shot cards · the 4 shots for this brand</h2><button class="btn sm primary" id="save-shots" type="button">Save shots</button></div>
+      <p class="hint" style="margin-top:0">Leave a card empty to use the Admin rulebook. Anything you fill here wins for this brand. The product itself is never changed.</p>
+      <div class="cards" id="shots"></div>
     </section>
 
     <section class="panel">
@@ -146,7 +156,17 @@ async function load(){D=await api(`/api/brands/${encodeURIComponent(KEY)}?q=${en
   $("#rank").disabled=KEY=="_default";$("#send").disabled=KEY=="_default";
   $("#fields").innerHTML=F.map(([k,l,ta])=>`<label class="field">${l}${ta?`<textarea data-k="${k}">${esc(D.profile[k])}</textarea>`:`<input data-k="${k}" value="${esc(D.profile[k])}">`}</label>`).join("");
   $("#gold").innerHTML=D.golden.map((g,i)=>`<figure><img src="${esc(g)}" alt="Golden shot ${i+1}"><button type="button" data-del="${i}" aria-label="Remove">✕</button></figure>`).join("")+`<label class="btn sm">+ Add<input type="file" accept="image/*" multiple hidden id="gold-up"></label>`;
-  renderLists()}
+  renderShots();renderLists()}
+
+const SH=[["hero","1 · Hero"],["detail","2 · Detail"],["use_case","3 · Use case"],["lifestyle","4 · Lifestyle"]];
+const METHOD={hero:[["auto","Edit the real photo (recommended)"],["fresh","Generate new"]],detail:[["auto","Crop real photo, else edit (recommended)"],["crop","Crop only"],["edit","Edit real photo"]],use_case:[["auto","Edit real 45° photo (recommended)"],["edit","Edit real photo"],["fresh","Generate new (needed for hands/people)"]],lifestyle:[["auto","Zoom-out edit (recommended)"],["edit","Zoom-out edit"],["fresh","Generate new"]]};
+const SF=[["scene","Scene / setting","e.g. pastel desk with laptop and notebook"],["background","Background / surface","e.g. light grey seamless · solid orange paper"],["props","Props","e.g. other Milan erasers, sticky notes"],["pose","Hands / people / pose","e.g. a hand writing in a notebook (leave empty for none)"],["extra","Extra instructions","anything else for this shot"]];
+function renderShots(){const S=D.profile.shots||{};$("#shots").innerHTML=SH.map(([k,l])=>{const c=S[k]||{};return `<div class="card" data-shot="${k}"><h3>${l}</h3>
+  <label>Method<select data-f="method">${METHOD[k].map(([v,t])=>`<option value="${v}"${(c.method||"auto")==v?" selected":""}>${t}</option>`).join("")}</select></label>
+  ${SF.filter(([f])=>!(k=="hero"&&f=="pose")).map(([f,t,ph])=>`<label>${t}<textarea rows="2" data-f="${f}" placeholder="${esc(ph)}">${esc(c[f]||"")}</textarea></label>`).join("")}</div>`}).join("")}
+$("#save-shots").onclick=async()=>{const shots={};document.querySelectorAll("#shots .card").forEach(cd=>{const c={};cd.querySelectorAll("[data-f]").forEach(i=>{if(i.value.trim())c[i.dataset.f]=i.value.trim()});
+  const filled=Object.keys(c).some(x=>x!="method")||(c.method&&c.method!="auto");c.mode=filled?"custom":"default";shots[cd.dataset.shot]=c});
+  try{await api(`/api/admin/library/brands/${encodeURIComponent(KEY)}`,{method:"PUT",body:{shots}});toast("Shot cards saved, used from the next generation");await load()}catch(x){toast(x.message)}};
 function renderLists(){
   $("#qn").textContent=D.queue.length;
   $("#queue").innerHTML=D.queue.map((x,i)=>{const s=ST[x.status]||["mute",x.status];return `<div class="item" draggable="true" data-key="${esc(x.key)}"><span class="n">${i+1}</span>${x.thumb?`<img src="${esc(x.thumb)}" alt="">`:`<span class="ph"></span>`}

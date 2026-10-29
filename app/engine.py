@@ -226,8 +226,27 @@ def edit_prompt(spec: dict, kind: str, card: dict | None = None) -> str:
     if kind == "lifestyle":
         lines.append("Build a wider, styled scene around the product; it may sit smaller in the frame but stays "
                      "unchanged and clearly visible.")
+    # everything set in Admin (Rulebook) and on the brand page
+    if f.get("shot_camera") and kind != "detail":
+        lines.append(f"Composition: {f.get('shot_framing', '')}. Camera: {f['shot_camera']}.")
+    if f.get("mood_name") or f.get("mood_styling"):
+        lines.append(f"Mood: {f.get('mood_name', '')}. {f.get('mood_styling', '')} Palette: {f.get('mood_palette', '')}.")
+    if f.get("brand_name"):
+        lines.append(f"Brand: {f['brand_name']}. {f.get('brand_positioning', '')} Brand colours: {f.get('brand_palette', '') or 'as on the product'}.")
+    if f.get("brand_dos") not in (None, "", "-"):
+        lines.append(f"Brand DO: {f['brand_dos']}")
+    if f.get("brand_donts") not in (None, "", "-"):
+        lines.append(f"Brand DON'T: {f['brand_donts']}")
+    if not card.get("pose") and f.get("human_line"):
+        lines.append(f.get("human_line"))
+    if f.get("negatives_line"):
+        lines.append(f"Avoid: {f['negatives_line']}.")
+    if f.get("house"):
+        lines.append(f["house"])
     if card.get("extra"):
         lines.append(f"Brand note: {card['extra']}")
+    if f.get("reviewer_note"):
+        lines.append(f"REVIEWER ADJUSTMENT (highest priority, but never change the product): {f['reviewer_note']}")
     mem = (f.get("memory_text") or "").strip()
     if mem:
         lines.append("Product facts (must stay true): " + mem)

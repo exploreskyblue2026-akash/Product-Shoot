@@ -98,7 +98,12 @@ def load_items(s: Session, items: list[dict]) -> dict:
             updated += 1
         text = " ".join(filter(None, [lp.name if lp else "", lp.category if lp else ""]))
         p.name = (lp.name if lp else it["code"])[:300]
-        p.brand_id = it.get("brand_key") or brand_for(s, f"{lp.brand if lp else ''} {text}")
+        if it.get("brand_key"):
+            p.brand_id = it["brand_key"]
+        else:                                            # same brand matching as the Brands pages (tab name first)
+            from .brands import brand_key_for, brand_rows
+            bk = brand_key_for(lp, brand_rows(s)) if lp else "_default"
+            p.brand_id = bk if bk != "_default" else brand_for(s, f"{lp.brand if lp else ''} {text}")
         p.category_id = category_for(s, text)
         p.data = {**(p.data or {}), "v2": True, "lib_key": key or "", "shots": it.get("shots") or [],
                   "note": it.get("note", ""), "priority": it.get("priority", n + 1), "brand_label": lp.brand if lp else "",

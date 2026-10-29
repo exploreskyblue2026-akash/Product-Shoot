@@ -203,6 +203,9 @@ def pick_scene(s: Session, product, analysis: dict) -> dict:
 
     def props_for(shot, n):
         chosen = [props[p]["prop"] for p in (analysis.get("props") or {}).get(shot, []) if p in props]
+        sig = split(brand.get("signature_props"))
+        if sig and shot != "detail":                     # brand page "Props allowed" wins over the generic library
+            chosen = sig[:n]
         if not chosen:
             for p in props.values():
                 if cat.get("category_id") in split(p["categories"]) and (shot in split(p["shots"]) or "any" in split(p["shots"])) \
@@ -273,9 +276,13 @@ def build_prompts(s: Session, product, analysis: dict, rv: RuleVersion, notes: d
         p = p.replace(p.split("\n")[1], "Professional e-commerce product photograph, 4:5 vertical, 1200x1500 px. " + LIGHT_TEXT[st["lighting"]], 1)
         p = p.replace("The product is the clear hero: ~70% of visual attention on the product, ~30% on set and props.",
                       "The product is the clear hero. " + ATTN_TEXT[st["attention"]])
-        p += house_block(s, product, sid)
-        if notes and notes.get(sh["no"]):
-            p += f"\n\n[ADJUSTMENT FROM REVIEWER]\n{notes[sh['no']]}"
+        house = house_block(s, product, sid)
+        p += house
+        note = (notes or {}).get(sh["no"]) or ""
+        if note:
+            p += f"\n\n[ADJUSTMENT FROM REVIEWER]\n{note}"
+        fill = {**fill, "house": house.strip(), "reviewer_note": note,
+                "negatives_line": fill["negatives"]}
         out.append({"no": sh["no"], "kind": sid, "prompt": p, "fill": fill, "light": LIGHT_TEXT[st["lighting"]],
                     "model_setting": SHOT_MODEL.get(sid, "model_other")})
     return out
