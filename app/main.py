@@ -25,6 +25,9 @@ async def lifespan(_app):
         seed(s, config.OWNER_EMAIL.lower(), hash_pw(config.OWNER_PASSWORD))
     if config.RUN_WORKER:
         pipeline.start_background()
+        import threading
+        from .connectors import mirror
+        threading.Thread(target=mirror.sweep_forever, daemon=True, name="mirror-sweep").start()
     yield
 
 

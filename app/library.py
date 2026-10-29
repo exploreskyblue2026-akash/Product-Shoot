@@ -656,6 +656,8 @@ def refs_with_angles(s: Session, key: str, limit: int = 4) -> list[dict]:
                                                          LibImage.cut_status != "skip"))
             if (i.meta or {}).get("kit") in (None, "approved")]
     live.sort(key=lambda i: (not i.primary, i.source == "kit", bool((i.meta or {}).get("flags")), -(i.w * i.h)))
+    from .connectors.mirror import restore
+    live = [i for i in live if restore(i.path)]          # photo lost in a redeploy and not in Drive: skip it
     return [{"path": i.path, "angle": (i.meta or {}).get("angle", ""), "id": i.id} for i in live[:limit]]
 
 

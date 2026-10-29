@@ -91,9 +91,14 @@ def restore(rel: str) -> bool:
         from ..db import FileMirror, SessionLocal
         with SessionLocal() as s:
             m = s.get(FileMirror, rel)
-            if not m:
+            did = m.drive_id if m else ""
+            if not did:                                   # not mirrored yet: fall back to the original in Raw input
+                from sqlalchemy import select
+                from ..db import LibImage
+                li = s.scalars(select(LibImage).where(LibImage.path == rel, LibImage.drive_id != "")).first()
+                did = li.drive_id if li else ""
+            if not did:
                 return False
-            did = m.drive_id
         from . import google
         data = google.download(did)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -106,3 +111,23 @@ def restore(rel: str) -> bool:
 
 def pending() -> int:
     return _q.qsize()
+
+
+def sweep_forever(every: int = 300):
+    """Safety net: any stored file without a Drive copy (e.g. an upload cut short by a restart) is queued again."""
+    import time
+    from ..db import FileMirror, SessionLocal
+    while True:
+        time.sleep(every)
+        try:
+            if not enabled():
+                continue
+            with SessionLocal() as s:
+                done = {r for (r,) in s.query(FileMirror.rel)}
+            for p in STORAGE_DIR.rglob("*"):
+                if p.is_file():
+                    rel = p.relative_to(STORAGE_DIR).as_posix()
+                    if rel not in done:
+                        queue_upload(rel)
+        except Exception as e:
+            print(f"[mirror] sweep failed: {str(e)[:160]}")
