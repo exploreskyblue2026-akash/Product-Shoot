@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.3.3 (approval fix; Max mode: Pro model for all 4 shots)"
+APP_VERSION = "3.4.0 (quality preset: Pro model all shots 2K, hero first, full QC, manual approval)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

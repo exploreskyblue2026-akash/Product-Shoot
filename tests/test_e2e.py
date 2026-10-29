@@ -6,7 +6,7 @@ from pathlib import Path
 TMP = tempfile.mkdtemp()
 os.environ.update({"AI_PROVIDER": "mock", "DATABASE_URL": os.environ.get("TEST_DATABASE_URL", f"sqlite:///{TMP}/t.db"), "STORAGE_DIR": f"{TMP}/store",
                    "RUN_WORKER": "false", "COOKIE_SECURE": "false", "OWNER_EMAIL": "owner@test.com",
-                   "OWNER_PASSWORD": "pw-for-tests", "SECRET_KEY": "test"})
+                   "OWNER_PASSWORD": "pw-for-tests", "SECRET_KEY": "test", "SKIP_PRESETS": "1"})
 
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402

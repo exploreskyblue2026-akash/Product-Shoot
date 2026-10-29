@@ -1,6 +1,7 @@
 """Static + dynamic dataset: seeding, lookups and the 6-layer prompt builder."""
 import csv
 import json
+import os
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,6 +39,21 @@ DEFAULT_SETTINGS = {
     "model_other": MODEL_IMAGE_FAST,
     "file_naming": "{code}_{colour}_{no}-{shot}.jpg",
     "min_raw_px": 800,
+}
+
+
+QUALITY_PRESET = {
+    "cost_mode": "max",            # Pro image model for all 4 shots, 2K
+    "engine_mode": "accurate",
+    "default_shots": [1],          # hero first; the rest after you approve it
+    "hero_gate": True,
+    "qc_mode": "full",
+    "retries": 0,
+    "auto_approve": False,         # always review until quality is proven
+    "publish_shopify": False,
+    "max_cost_product": 1.0,
+    "daily_budget": 10.0,
+    "min_raw_px": 1500,
 }
 
 
@@ -83,6 +99,11 @@ def seed(s: Session, owner_email: str, owner_hash: str):
     for k, v in DEFAULT_SETTINGS.items():
         if s.get(Setting, k) is None:
             set_setting(s, k, v)
+    # one-time switch to the agreed quality setup (Oct 2026); later edits in Admin are kept
+    if not get_setting(s, "preset_quality_v1", False) and os.environ.get("SKIP_PRESETS") != "1":
+        for k, v in QUALITY_PRESET.items():
+            set_setting(s, k, v)
+        set_setting(s, "preset_quality_v1", True)
     if not s.scalars(select(User).where(User.email == owner_email)).first():
         s.add(User(email=owner_email, role="owner", password_hash=owner_hash, active=True))
     s.commit()
