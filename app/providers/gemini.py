@@ -41,6 +41,11 @@ def _pick(names: list[str], kind: str) -> str | None:
     return pref[0] if pref else None
 
 
+def _tier(name: str) -> int:
+    n = (name or "").lower()
+    return 0 if "lite" in n else 2 if "pro" in n else 1
+
+
 class GeminiProvider:
     _resolved: dict = {}
 
@@ -96,11 +101,12 @@ class GeminiProvider:
                         print(f"[gemini] {model} busy ({msg[:60]}), retrying in {wait}s")
                         time.sleep(wait)
             alt = _pick([n for n in self._available() if n not in tried], kind)
+            if kind == "image" and alt and _tier(alt) < _tier(tried[0]):
+                alt = None                                 # never fall back to a cheaper image model silently
             if not alt:
                 first = errors[0] if errors else (model, last)
                 raise RuntimeError(f"{first[0]} failed: {first[1]}  (also tried: {', '.join(tried[1:]) or 'none'})")
-            print(f"[gemini] switching {model} -> {alt}")
-            self._resolved[tried[0]] = alt
+            print(f"[gemini] switching {model} -> {alt} (this call only)")
             tried.append(alt)
             model = alt
 

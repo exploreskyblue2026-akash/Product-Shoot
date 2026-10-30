@@ -14,7 +14,7 @@ DEFAULT_STRENGTH = {"lighting": "strict", "attention": "normal", "size": "normal
                     "props": "normal", "negative_space": "relaxed"}
 
 DEFAULT_SETTINGS = {
-    "engine_mode": "accurate",     # accurate: keep the real photo (edit / crop / restore); classic: always regenerate
+    "engine_mode": "classic",      # accurate: keep the real photo (edit / crop / restore); classic: always regenerate
     "library_focus": False,        # False: scan everything in Raw input; True: only shoot-sheet / brand-queue codes
     "library_autoscan": True,      # re-scan the saved Drive link every 30 min (new files only)
     "library_cutouts": False,      # False: keep original photos (AI generation). True: cut-outs + composite engine
@@ -44,7 +44,7 @@ DEFAULT_SETTINGS = {
 
 QUALITY_PRESET = {
     "cost_mode": "max",            # Pro image model for all 4 shots, 2K
-    "engine_mode": "accurate",
+    "engine_mode": "classic",
     "default_shots": [1],          # hero first; the rest after you approve it
     "hero_gate": True,
     "qc_mode": "full",
@@ -104,6 +104,10 @@ def seed(s: Session, owner_email: str, owner_hash: str):
         for k, v in QUALITY_PRESET.items():
             set_setting(s, k, v)
         set_setting(s, "preset_quality_v1", True)
+    # Oct 30: back to full generation from the real photo (what produced the first good results)
+    if not get_setting(s, "preset_engine_v2", False) and os.environ.get("SKIP_PRESETS") != "1":
+        set_setting(s, "engine_mode", "classic")
+        set_setting(s, "preset_engine_v2", True)
     if not s.scalars(select(User).where(User.email == owner_email)).first():
         s.add(User(email=owner_email, role="owner", password_hash=owner_hash, active=True))
     s.commit()
