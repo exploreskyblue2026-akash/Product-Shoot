@@ -151,6 +151,13 @@ class GeminiProvider:
 
     def generate(self, prompt: str, raw: bytes, model: str, size: str = IMAGE_SIZE, refs: list | None = None,
                  style: bytes | None = None) -> bytes:
+        if str(model).startswith("openrouter:"):               # FLUX.2 etc. through OpenRouter
+            from . import openrouter
+            imgs = [raw] + list(refs or [])[:2]
+            lead = ("The first image is the real product. " if len(imgs) == 1 else
+                    f"The first {len(imgs)} images all show the SAME real product; reproduce it exactly. ")
+            self.last_model = model
+            return openrouter.generate(model.split(":", 1)[1], lead + prompt, imgs)
         parts = [types.Part.from_bytes(data=raw, mime_type=_mime(raw))]
         for extra in (refs or [])[:2]:
             parts.append(types.Part.from_bytes(data=extra, mime_type=_mime(extra)))

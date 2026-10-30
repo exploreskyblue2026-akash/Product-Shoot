@@ -778,3 +778,31 @@ def test_shots_2_to_4_are_anchored_to_the_approved_hero():
             assert "pro" in g["model"]                     # Max mode: the best model for every shot
     finally:
         mock.MockProvider.generate = og
+
+
+def test_per_shot_model_and_upgrade_on_qc_fail():
+    from app.providers import mock
+    c = client()
+    c.put("/api/admin/settings", json={"default_shots": [1], "max_cost_product": 5, "daily_budget": 100, "retries": 0,
+                                       "qc_mode": "light", "model_hero": "openrouter:black-forest-labs/flux.2-pro:free",
+                                       "escalate_model": "gemini-3-pro-image"})
+    c.post("/api/autopilot", json={"autopilot": False})
+    c.post("/api/sources/upload", files=[("files", ("ESC-1_front.jpg", (SAMPLES / "WAT-HEM-SSGT_front.png").read_bytes(), "image/jpeg"))])
+    pid = {x["code"]: x["id"] for x in c.get("/api/state").json()["queue"]}["ESC-1"]
+    used = []
+    og, oq = mock.MockProvider.generate, mock.MockProvider.qc
+    def spy(self, prompt, raw, model, size="1K", refs=None, style=None):
+        used.append(model)
+        return og(self, prompt, raw, model, size, refs, style)
+    def qc(self, raw, gen, shot, rules):
+        ok = len(used) > 1
+        return {"checks": {"shape_match": ok, "label_text": True, "no_artifacts": True}, "reasons": {} if ok else {"shape_match": "redrawn"}}
+    mock.MockProvider.generate, mock.MockProvider.qc = spy, qc
+    try:
+        c.post(f"/api/products/{pid}/run"); pipeline.tick()
+        assert used == ["openrouter:black-forest-labs/flux.2-pro:free", "gemini-3-pro-image"], used
+        hero = c.get(f"/api/products/{pid}").json()["shots"][0]
+        assert hero["status"] == "pass" and hero["model"] == "gemini-3-pro-image"
+    finally:
+        mock.MockProvider.generate, mock.MockProvider.qc = og, oq
+        c.put("/api/admin/settings", json={"model_hero": "", "escalate_model": ""})

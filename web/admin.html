@@ -119,18 +119,27 @@ pre.prompt{margin:0;font-family:var(--f-mono);font-size:12px;line-height:1.55;wh
           <div class="panel-h"><h2>Keys</h2><span class="hint">Owner only · stored encrypted</span></div>
           <div id="keys" style="display:flex;flex-direction:column;gap:8px"></div>
           <form id="key-form" class="toolbar" style="margin-top:12px">
-            <div class="field" style="flex:0 1 230px"><label for="key-name">Key</label><select id="key-name"><option>GEMINI_API_KEY</option><option>GOOGLE_SERVICE_ACCOUNT_JSON</option><option>SHOPIFY_STORE</option><option>SHOPIFY_CLIENT_ID</option><option>SHOPIFY_CLIENT_SECRET</option><option>SHOPIFY_ADMIN_TOKEN</option></select></div>
+            <div class="field" style="flex:0 1 230px"><label for="key-name">Key</label><select id="key-name"><option>GEMINI_API_KEY</option><option>OPENROUTER_API_KEY</option><option>GOOGLE_SERVICE_ACCOUNT_JSON</option><option>SHOPIFY_STORE</option><option>SHOPIFY_CLIENT_ID</option><option>SHOPIFY_CLIENT_SECRET</option><option>SHOPIFY_ADMIN_TOKEN</option></select></div>
             <div class="field" style="flex:1 1 220px"><label for="key-val">Value</label><input id="key-val" type="password" autocomplete="off" required></div>
             <button class="btn primary" type="submit">Save key</button>
           </form>
         </section>
         <section class="panel">
           <div class="panel-h"><h2>Connection tests</h2></div>
-          <div class="toolbar"><button class="btn" type="button" data-test="gemini">Test Gemini</button><button class="btn" type="button" data-test="google">Test Google Drive</button><button class="btn" type="button" data-test="shopify">Test Shopify</button></div>
+          <div class="toolbar"><button class="btn" type="button" data-test="gemini">Test Gemini</button><button class="btn" type="button" data-test="openrouter">Test OpenRouter</button><button class="btn" type="button" data-test="google">Test Google Drive</button><button class="btn" type="button" data-test="shopify">Test Shopify</button></div>
           <p class="hint" id="test-out" style="margin:12px 0 0;white-space:pre-wrap"></p>
           <div class="form2" style="margin-top:14px">
             <div class="field"><label for="s-model_hero_detail">Best model (used by Premium for hero/detail, by Max for all shots)</label><input id="s-model_hero_detail" class="mono" data-setting="model_hero_detail"></div>
             <div class="field"><label for="s-model_other">Fast model (used by Standard, and by Premium for use case/lifestyle)</label><input id="s-model_other" class="mono" data-setting="model_other"></div>
+          </div>
+          <h3 style="margin:18px 0 4px;font-size:15px">Model per shot <span class="hint">(blank = use Cost mode)</span></h3>
+          <p class="hint" style="margin:0 0 8px">Gemini: <span class="mono">gemini-3-pro-image</span>, <span class="mono">gemini-nano-banana-2.1</span>. OpenRouter: start with <span class="mono">openrouter:</span>, e.g. <span class="mono">openrouter:black-forest-labs/flux.2-pro:free</span>.</p>
+          <div class="form2">
+            <div class="field"><label for="s-model_hero">1 · Hero</label><input id="s-model_hero" class="mono" data-setting="model_hero"></div>
+            <div class="field"><label for="s-model_detail">2 · Detail</label><input id="s-model_detail" class="mono" data-setting="model_detail"></div>
+            <div class="field"><label for="s-model_use_case">3 · Use case</label><input id="s-model_use_case" class="mono" data-setting="model_use_case"></div>
+            <div class="field"><label for="s-model_lifestyle">4 · Lifestyle</label><input id="s-model_lifestyle" class="mono" data-setting="model_lifestyle"></div>
+            <div class="field"><label for="s-escalate_model">If QC fails, retry once with (blank = no upgrade)</label><input id="s-escalate_model" class="mono" data-setting="escalate_model" placeholder="gemini-3-pro-image"></div>
           </div>
           <div class="toolbar" style="margin-top:12px"><button class="btn" type="button" data-save-settings>Save models</button></div>
         </section>

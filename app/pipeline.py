@@ -46,6 +46,9 @@ def day_spend(s: Session) -> float:
 def _model_for(s: Session, kind: str) -> tuple[str, str]:
     mode = get_setting(s, "cost_mode", "economy")
     hero_m, other_m, size = config.COST_MODES.get(mode, config.COST_MODES["economy"])
+    own = (get_setting(s, f"model_{kind}", "") or "").strip()      # Admin: a model chosen for this one shot
+    if own:
+        return (own if own.startswith("openrouter:") else config.model_name(own)), size
     pick = hero_m if kind in ("hero", "detail") else other_m
     # the model boxes in Admin -> API & models are what "pro" and "fast" mean (blank = built-in default)
     chosen = {"pro": get_setting(s, "model_hero_detail", ""), "fast": get_setting(s, "model_other", "")}.get(pick) or ""
@@ -311,7 +314,9 @@ def process(pid: int, only: list[int] | None = None):
             prompt = spec["prompt"]
             call_refs = ([hero_ref] if hero_ref else []) + refs[: (1 if hero_ref else 2)]
             result = None
-            for attempt in range(retries + 1):
+            escalate = (get_setting(s, "escalate_model", "") or "").strip()
+            escalated = False
+            for attempt in range(retries + 1 + (1 if escalate and escalate != model else 0)):
                 if STOP.is_set():
                     stop_reason = "Stopped by you"
                     break
@@ -352,6 +357,11 @@ def process(pid: int, only: list[int] | None = None):
                     from .library import learn_from_fail
                     learn_from_fail(s, p.data["lib_key"], [f"{sh.kind}: {r}" for r in failed])
                 prompt = spec["prompt"] + "\n\n[CORRECTION — previous attempt failed QC]\nFix: " + "; ".join(failed)
+                if escalate and not escalated and escalate != model:      # cheap model failed: one try with the best
+                    model, escalated = escalate, True
+                    sh.model = model
+                elif attempt >= retries:
+                    break
             if result is None:
                 sh.status = "wait"
             elif result.get("unchecked"):

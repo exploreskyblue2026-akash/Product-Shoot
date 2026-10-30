@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.6.0 (exact-code photos, hero-anchored shots, product lock, new shot rules, Shopify listing sheet + field preview)"
+APP_VERSION = "3.7.0 (OpenRouter / FLUX.2 provider, model per shot, upgrade on QC fail)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
@@ -54,6 +54,9 @@ def mode_model(kind: str) -> str:
 
 
 def image_cost(model: str, size: str = "1K") -> float:
+    if str(model).startswith("openrouter:"):
+        m = model.lower()
+        return 0.0 if m.endswith(":free") else 0.075 if "max" in m else 0.02 if "klein" in m else 0.05
     m = model_name(model)
     base = COST_IMAGE_PRO if "pro" in m else COST_IMAGE_LITE if "lite" in m else COST_IMAGE_FAST
     return round(base * SIZE_FACTOR.get(size, 1.0), 4)
