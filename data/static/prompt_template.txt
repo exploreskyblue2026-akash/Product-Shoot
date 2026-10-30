@@ -3,7 +3,7 @@ Professional e-commerce product photograph, 4:5 vertical, 1200x1500 px. STRICTLY
 The product is the clear hero: ~70% of visual attention on the product, ~30% on set and props. Product sharpest and brightest element, never cropped, at least 8% margin. Props at true real-world scale, muted, supporting.
 
 [2 PRODUCT FIDELITY — static]
-Reproduce the product EXACTLY as in the reference image: {product_description}. Keep shape, proportions, colour ({product_colours}), finish, logo and label text ("{visible_text}") unchanged and readable, facing camera. Item count: {item_count}.
+This is a real product we sell; the picture is legal proof of what the customer receives. Reproduce it EXACTLY as in the real product photos: {product_description}. Same shape, proportions, colours ({product_colours}), materials, finish, pattern and print placement, logo and every printed word ("{visible_text}"), same number of items ({item_count}) in the same order. Do not redesign, simplify, recolour, re-pattern, re-letter or "improve" anything. Do not show a side or part that is not visible in the photos.
 
 [3 SHOT DIRECTION — static per shot]
 Shot {shot_no} of 5 — {shot_id}: {shot_purpose}.

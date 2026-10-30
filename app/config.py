@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.5.0 (generate mode default; no silent fallback to cheaper models; model shown per shot)"
+APP_VERSION = "3.6.0 (exact-code photos, hero-anchored shots, product lock, new shot rules, Shopify listing sheet + field preview)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

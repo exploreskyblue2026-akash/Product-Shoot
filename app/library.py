@@ -184,8 +184,11 @@ def resolve(code, idx: dict[str, LibProduct]) -> tuple[LibProduct | None, str]:
         return None, ""
     if k in idx:
         return idx[k], "exact"
-    close = get_close_matches(k, [x for x in idx if len(x) >= 5], n=1, cutoff=0.88)
-    return (idx[close[0]], f"close match ({close[0]})") if close else (None, "")
+    close = get_close_matches(k, [x for x in idx if len(x) >= 5], n=2, cutoff=0.88)
+    close = [c for c in close if c[-3:] == k[-3:] and len(c) != len(k)]     # 'PIP25RD' ~ 'PPIP25RD' only;
+    if len(close) == 1:                                                     # never another colour/variant
+        return idx[close[0]], f"close match ({close[0]})"
+    return None, ""
 
 
 # ------------------------------------------------------------------ shoot sheet
@@ -273,26 +276,19 @@ def _ham(a: str, b: str) -> int:
 
 
 def key_from_name(name: str, idx: dict[str, LibProduct]) -> LibProduct | None:
-    """Find a known code inside a file or folder name: '6110224MET_front.jpg', 'BCO64-GY 2.png', '76618/IMG_1.jpg'."""
-    parts = [norm(x) for x in re.split(r"[\\/]", name)]
-    stem_parts = [norm(re.sub(r"\.[a-z0-9]{3,4}$", "", x, flags=re.I)) for x in re.split(r"[\\/]", name)]
+    """Exact product code in a file or folder name, as whole words only: '6110224MET_front.jpg', 'BCO64-GY 2.png',
+    '76618/IMG_1.jpg'. A code merely contained inside a longer word never counts (081264FRS != 081264FRSX)."""
     best = None
-    for part in stem_parts[::-1] + parts[::-1]:
-        if not part:
-            continue
-        if part in idx:
-            return idx[part]
-        for k in idx:                                    # longest code contained in the name wins
-            if len(k) >= 5 and k in part and (best is None or len(k) > len(best[0])):
-                best = (k, idx[k])
-        # tokens split on _ - space, e.g. "TRV20-GY_1"
-    if best:
-        return best[1]
-    toks = re.split(r"[_\s.]+", re.sub(r"\.[a-z0-9]{3,4}$", "", name.split("/")[-1], flags=re.I))
-    for i in range(len(toks), 0, -1):
-        k = norm("".join(toks[:i]))
-        if k in idx:
-            return idx[k]
+    for part in re.split(r"[\\/]", name)[::-1]:
+        stem = re.sub(r"\.[a-z0-9]{3,4}$", "", part, flags=re.I)
+        toks = [x for x in re.split(r"[^A-Za-z0-9]+", stem) if x]
+        for i in range(len(toks)):
+            for j in range(i + 1, min(len(toks), i + 4) + 1):        # a code may be split by - / _ : BCO64-GY
+                k = norm("".join(toks[i:j]))
+                if k in idx and (best is None or len(k) > len(best[0])):
+                    best = (k, idx[k])
+        if best:
+            return best[1]                               # the file name wins over its folder names
     return None
 
 
@@ -655,6 +651,8 @@ def refs_with_angles(s: Session, key: str, limit: int = 4) -> list[dict]:
     live = [i for i in s.scalars(select(LibImage).where(LibImage.key == key, LibImage.dup_of.is_(None),
                                                          LibImage.cut_status != "skip"))
             if (i.meta or {}).get("kit") in (None, "approved")]
+    if any(i.source not in ("catalogue", "kit") for i in live):   # real photos of this exact code exist:
+        live = [i for i in live if i.source != "catalogue"]         # never mix in catalogue pictures
     live.sort(key=lambda i: (not i.primary, i.source == "kit", bool((i.meta or {}).get("flags")), -(i.w * i.h)))
     from .connectors.mirror import restore
     live = [i for i in live if restore(i.path)]          # photo lost in a redeploy and not in Drive: skip it
@@ -821,6 +819,7 @@ def assign(s: Session, image_id: int, code: str) -> str:
     if not img or not p:
         raise ValueError("Code not found in the master sheet")
     img.key = p.key
+    img.meta = {**(img.meta or {}), "by_hand": True}
     pick_primary(s, p.key)
     if not cutouts_on(s):
         try:
@@ -834,3 +833,36 @@ def assign(s: Session, image_id: int, code: str) -> str:
 def clear(s: Session):
     s.execute(delete(LibImage))
     s.commit()
+
+
+def recheck_matches(s: Session) -> dict:
+    """One-time clean-up after exact matching: photos whose file name does not hold their product's exact code go
+    back to Unmatched, and those products are studied again from the right photos only."""
+    idx = _index(s)
+    moved, touched = 0, set()
+    for img in s.scalars(select(LibImage).where(LibImage.key != "", LibImage.source.in_(("drive", "file")))):
+        if (img.meta or {}).get("by_hand"):
+            continue
+        name = img.src_name or img.path
+        p = key_from_name(name, idx)
+        if p is None and img.key not in norm(name):      # no code in the name at all: assigned by hand, keep it
+            continue
+        if p is None or p.key != img.key:
+            touched.add(img.key)
+            img.meta = {**(img.meta or {}), "was": img.key}
+            img.key, img.primary = (p.key if p else ""), False
+            if p:
+                touched.add(p.key)
+            moved += 1
+    for key in touched:
+        lp = s.scalar(select(LibProduct).where(LibProduct.key == key))
+        if lp is not None:
+            d = dict(lp.data or {})
+            d.pop("memory", None)                         # re-learn the product from its correct photos
+            lp.data = d
+        imgs = list(s.scalars(select(LibImage).where(LibImage.key == key, LibImage.dup_of.is_(None))))
+        if imgs and not any(i.primary for i in imgs):
+            max(imgs, key=lambda i: i.w * i.h).primary = True
+    log(s, "library", f"Exact-code re-check: {moved} photos re-filed, {len(touched)} products will be re-studied")
+    s.commit()
+    return {"moved": moved, "products": len(touched)}

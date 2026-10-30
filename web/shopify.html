@@ -81,35 +81,74 @@ td img{width:48px;height:60px;object-fit:cover;border-radius:4px;background:var(
 </header>
 <main>
   <section class="panel">
-    <div class="panel-h"><h2>Shopify queue</h2><span class="chip mute" id="job">Idle</span></div>
-    <p class="hint" style="margin-top:0">Approved products wait here. <b>Push</b> finds the product in your store by <b>barcode</b>, then by <b>SKU</b>, and adds the approved shots (hero first, with alt text). Shots already on Shopify are never uploaded twice. If nothing matches, a <b>draft</b> product is created from the master sheet (title, SKU, barcode, price, brand), so nothing goes live without you.</p>
-    <div class="row" style="margin-bottom:10px"><button class="btn primary" id="push-sel" type="button">Push selected</button><button class="btn" id="push-ready" type="button">Push all ready</button><button class="btn" id="skip-sel" type="button">Skip selected</button>
-      <label class="hint" style="align-self:center"><input type="checkbox" id="only-ready" checked> Show only not-yet-pushed</label></div>
-    <div class="tw"><table><thead><tr><th><input type="checkbox" id="all" aria-label="Select all"></th><th></th><th>Code</th><th>Product</th><th>Barcode / SKU</th><th>Price</th><th>Shots</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
+    <div class="panel-h"><h2>1 · Listing sheet <span class="hint">(optional)</span></h2><span class="chip mute" id="ls-chip">None loaded</span></div>
+    <p class="hint" style="margin-top:0">The products the website team wants listed. Needs a code column (<b>Product ID</b>, <b>Item code</b>, <b>EAN/Barcode</b> or <b>SKU</b>). Optional columns: <b>Category</b>, <b>Collections</b>, <b>Tags</b>, <b>Template</b>, <b>Title</b>, <b>Description</b> (several values separated by <span class="mono">|</span> or <span class="mono">,</span>).</p>
+    <div class="row"><label class="btn" for="ls-file">Upload listing sheet (.xlsx / .csv)</label><input type="file" id="ls-file" accept=".xlsx,.csv" hidden>
+      <button class="btn" type="button" id="ls-clear">Remove sheet</button>
+      <div class="field" style="flex:1 1 260px"><label for="tpl">Default theme template (used when the sheet has none)</label><input id="tpl" class="mono" placeholder="e.g. product-stationery (blank = store default)"></div>
+      <button class="btn" type="button" id="tpl-save">Save template</button></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-h"><h2>2 · Push to Shopify</h2><span class="chip mute" id="job">Idle</span></div>
+    <p class="hint" style="margin-top:0">Push finds the store product by <b>barcode</b>, then <b>SKU</b>. Fields are <b>filled only when empty</b> in Shopify unless you tick overwrite. Images already on the product are never uploaded twice. Collections must already exist; none are created. <b>Price and inventory are never changed.</b> If nothing matches, a <b>draft</b> is created. Click <b>Preview</b> to see every field before pushing.</p>
+    <div class="stats" id="tabs" role="tablist" style="margin-bottom:12px"></div>
+    <div class="row" style="margin-bottom:10px"><button class="btn primary" id="push-sel" type="button">Push selected</button><button class="btn" id="push-ready" type="button">Push all in this list</button><button class="btn" id="skip-sel" type="button">Skip selected</button>
+      <label class="hint" style="align-self:center"><input type="checkbox" id="ow"> Overwrite fields that already have a value (never SKU, barcode, price or inventory)</label>
+      <label class="hint" style="align-self:center"><input type="checkbox" id="only-ready" checked> Hide pushed / skipped</label></div>
+    <div class="tw" id="list"></div>
+  </section>
+
+  <section class="panel" id="pv" hidden>
+    <div class="panel-h"><h2 id="pv-h">Preview</h2><button class="btn sm" type="button" id="pv-close">Close</button></div>
+    <p class="hint" id="pv-how" style="margin-top:0"></p>
+    <div class="tw"><table><thead><tr><th>Field</th><th>Now in Shopify</th><th>Tool will write</th><th>Action</th></tr></thead><tbody id="pv-rows"></tbody></table></div>
   </section>
 </main>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script>
 const $=s=>document.querySelector(s), esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("on"),3500)}
-async function api(p,o={}){const r=await fetch(p,{credentials:"same-origin",...o,headers:o.body?{"Content-Type":"application/json"}:{},body:o.body?JSON.stringify(o.body):undefined});
+async function api(p,o={}){const isF=o.body instanceof FormData;const r=await fetch(p,{credentials:"same-origin",...o,headers:o.body&&!isF?{"Content-Type":"application/json"}:{},body:o.body?(isF?o.body:JSON.stringify(o.body)):undefined});
   if(r.status==401){location.href="/login";throw new Error("Signed out")} const j=await r.json().catch(()=>({})); if(!r.ok)throw new Error(j.detail||r.statusText); return j}
 const ST={ready:["info","Ready"],pushed:["ok","Pushed"],failed:["bad","Failed"],skipped:["mute","Skipped"]};
-let D=null;
+const ACT={fill:["ok","Fill (empty now)"],overwrite:["warn","Overwrite"],add:["ok","Add"],keep:["mute","Keep Shopify's"],same:["mute","Already the same"],none:["mute","—"],skip:["warn","Skipped"]};
+let D=null, TAB="ready_in_sheet";
+const TABS=[["ready_in_sheet","Ready · in listing sheet"],["ready_not_in_sheet","Ready · not in sheet"],["in_sheet_not_ready","In sheet · not ready"]];
 async function load(){D=await api("/api/shopify/queue");const j=D.job;$("#job").className="chip "+(j.error?"bad":j.running?"info":"mute");$("#job").textContent=j.error||j.msg||"Idle";
-  const only=$("#only-ready").checked, items=D.items.filter(x=>!only||!["pushed","skipped"].includes(x.shopify_status||"ready"));
-  $("#rows").innerHTML=items.map(x=>{const s=ST[x.shopify_status||"ready"]||["mute",x.shopify_status];
-    const note=x.shopify_status=="pushed"?`${x.shopify_added} added · ${esc(x.shopify_how)}${x.shopify_skipped?` · ${x.shopify_skipped} already there`:""}`:x.shopify_status=="failed"?esc(x.shopify_error):"";
-    return `<tr><td><input type="checkbox" data-id="${x.id}" aria-label="Select ${esc(x.code)}"></td><td>${x.hero?`<img src="${esc(x.hero)}" alt="">`:""}</td><td class="mono">${esc(x.code)}</td><td>${esc(x.name)}<div class="hint">${esc(x.brand)}</div></td>
-      <td class="mono">${esc(x.barcode||"—")}<div class="hint">${esc(x.sku)}</div></td><td>${x.price?"₹"+esc(x.price):"—"}</td><td>${x.images}</td><td><span class="chip ${s[0]}">${s[1]}</span><div class="hint">${note}</div></td></tr>`}).join("")||'<tr><td colspan="8" class="empty">Nothing waiting. Approved products appear here.</td></tr>';
+  const L=D.listing;$("#ls-chip").className="chip "+(L.count?"ok":"mute");$("#ls-chip").textContent=L.count?`${L.file} · ${L.count} products`:"None loaded: every ready product is listed";
+  if(document.activeElement!==$("#tpl"))$("#tpl").value=D.template||"";
+  const tabs=L.count?TABS:TABS.slice(0,1);if(!L.count)TAB="ready_in_sheet";
+  $("#tabs").innerHTML=tabs.map(([k,t])=>`<button type="button" role="tab" aria-pressed="${k==TAB}" data-tab="${k}"><b>${D[k].length}</b>${L.count||k!="ready_in_sheet"?t:"Ready to push"}</button>`).join("");
+  const only=$("#only-ready").checked;
+  if(TAB=="in_sheet_not_ready"){$("#list").innerHTML=`<table><thead><tr><th>Code</th><th>Product</th><th>Why not ready</th></tr></thead><tbody>${D[TAB].map(x=>`<tr><td class="mono">${esc(x.code)}</td><td>${esc(x.name||"—")}</td><td><span class="chip warn">${esc(x.why)}</span></td></tr>`).join("")||'<tr><td colspan="3" class="empty">Everything in the sheet is ready.</td></tr>'}</tbody></table>`;
+    ["#push-sel","#push-ready","#skip-sel"].forEach(s=>$(s).disabled=true)}
+  else{["#push-sel","#push-ready","#skip-sel"].forEach(s=>$(s).disabled=false);
+    const items=D[TAB].filter(x=>!only||!["pushed","skipped"].includes(x.shopify_status||"ready"));
+    $("#list").innerHTML=`<table><thead><tr><th><input type="checkbox" id="all" aria-label="Select all"></th><th></th><th>Code</th><th>Product</th><th>Barcode / SKU</th><th>Shots</th><th>Status</th><th></th></tr></thead><tbody>${items.map(x=>{const s=ST[x.shopify_status||"ready"]||["mute",x.shopify_status];
+      const note=x.shopify_status=="pushed"?`${x.shopify_added} image(s) · ${esc((x.shopify_fields||[]).join(", ")||"no fields changed")} · ${esc(x.shopify_how)}`:x.shopify_status=="failed"?esc(x.shopify_error):"";
+      return `<tr><td><input type="checkbox" data-id="${x.id}" aria-label="Select ${esc(x.code)}"></td><td>${x.hero?`<img src="${esc(x.hero)}" alt="">`:""}</td><td class="mono">${esc(x.code)}</td><td>${esc(x.name)}<div class="hint">${esc(x.brand)}</div></td>
+        <td class="mono">${esc(x.barcode||"—")}<div class="hint">${esc(x.sku)}</div></td><td>${x.images}</td><td><span class="chip ${s[0]}">${s[1]}</span><div class="hint">${note}</div></td><td><button class="btn sm" type="button" data-pv="${x.id}">Preview</button></td></tr>`}).join("")||'<tr><td colspan="8" class="empty">Nothing here.</td></tr>'}</tbody></table>`;
+    $("#all").onchange=e=>document.querySelectorAll("#list [data-id]").forEach(x=>x.checked=e.target.checked)}
   if(j.running)setTimeout(load,2500)}
-const sel=()=>[...document.querySelectorAll("#rows [data-id]:checked")].map(x=>+x.dataset.id);
-async function push(ids){if(!ids.length)return toast("Select products first");try{await api("/api/shopify/push",{method:"POST",body:{ids}});toast(`Pushing ${ids.length} product(s)…`);setTimeout(load,800)}catch(e){toast(e.message)}}
+const sel=()=>[...document.querySelectorAll("#list [data-id]:checked")].map(x=>+x.dataset.id);
+async function push(ids){if(!ids.length)return toast("Select products first");const ow=$("#ow").checked;
+  if(ow&&!confirm("Overwrite existing Shopify fields (title, description, category, type, vendor, template) for "+ids.length+" product(s)?"))return;
+  try{await api("/api/shopify/push",{method:"POST",body:{ids,overwrite:ow}});toast(`Pushing ${ids.length} product(s)…`);setTimeout(load,800)}catch(e){toast(e.message)}}
 $("#push-sel").onclick=()=>push(sel());
-$("#push-ready").onclick=()=>push(D.items.filter(x=>!x.shopify_status||x.shopify_status=="ready"||x.shopify_status=="failed").map(x=>x.id));
+$("#push-ready").onclick=()=>push(D[TAB].filter(x=>!x.shopify_status||x.shopify_status=="ready"||x.shopify_status=="failed").map(x=>x.id));
 $("#skip-sel").onclick=async()=>{const ids=sel();if(!ids.length)return;await api("/api/shopify/skip",{method:"POST",body:{ids}});load()};
-$("#all").onchange=e=>document.querySelectorAll("#rows [data-id]").forEach(x=>x.checked=e.target.checked);
 $("#only-ready").onchange=load;
+document.addEventListener("click",async e=>{const t=e.target.closest("[data-tab]");if(t){TAB=t.dataset.tab;load();return}
+  const b=e.target.closest("[data-pv]");if(!b)return;b.disabled=true;b.textContent="Checking…";
+  try{const r=await api(`/api/shopify/preview/${b.dataset.pv}?overwrite=${$("#ow").checked}`);$("#pv").hidden=false;$("#pv-h").textContent=`Preview · ${r.code}`;
+    $("#pv-how").textContent=(r.found?"Matched in your store by ":"")+r.how;
+    $("#pv-rows").innerHTML=r.rows.map(x=>{const a=ACT[x.action]||["mute",x.action];return `<tr><td><b>${esc(x.field)}</b></td><td>${esc(x.current||"—")}</td><td>${esc(x.proposed||"—")}</td><td><span class="chip ${a[0]}">${a[1]}</span></td></tr>`}).join("");
+    $("#pv").scrollIntoView({behavior:"smooth"})}catch(x){toast(x.message)}finally{b.disabled=false;b.textContent="Preview"}});
+$("#pv-close").onclick=()=>$("#pv").hidden=true;
+$("#ls-file").onchange=async e=>{const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append("file",f,f.name);try{const r=await api("/api/shopify/listing",{method:"POST",body:fd});toast(`Listing sheet loaded: ${r.products} products`);TAB="ready_in_sheet";load()}catch(x){toast(x.message)}e.target.value=""};
+$("#ls-clear").onclick=async()=>{await api("/api/shopify/listing",{method:"DELETE"});toast("Listing sheet removed");load()};
+$("#tpl-save").onclick=async()=>{await api("/api/shopify/template",{method:"PUT",body:{template:$("#tpl").value}});toast("Default template saved")};
 load().catch(e=>toast(e.message));
 </script>
 </body>

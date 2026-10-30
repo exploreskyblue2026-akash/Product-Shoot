@@ -100,6 +100,55 @@ def _render_accurate(s, p, sh, spec, prov, model, size, refs, style, angle_raw, 
     return img, {**how, "method": "fresh"}
 
 
+def style_text(s: Session, p: Product, prov) -> str:
+    """The golden shots described in words once (cached). Pictures of other products are never shown to the image
+    model, so it cannot copy them into the scene."""
+    from .dataset import is_unbranded
+    from .db import LibraryRow
+    keys = []
+    if p.brand_id and p.brand_id != "_default" and not is_unbranded(p):
+        keys.append(("brands", p.brand_id))
+    keys += [("categories", p.category_id), ("brands", "_default")]
+    for table, key in keys:
+        row = s.scalar(select(LibraryRow).where(LibraryRow.table == table, LibraryRow.key == key))
+        gold = list(((row.data or {}).get("golden") or [])) if row is not None else []
+        if not gold:
+            continue
+        sig = "|".join(gold)
+        if (row.data or {}).get("golden_sig") == sig and (row.data or {}).get("golden_style"):
+            return row.data["golden_style"]
+        imgs = []
+        for rel in gold[:3]:
+            try:
+                imgs.append(storage.read(rel))
+            except Exception:
+                pass
+        if not imgs or not hasattr(prov, "describe_style"):
+            return ""
+        try:
+            txt = prov.describe_style(imgs)
+            _charge(s, p, "vision", config.model_name(config.MODEL_VISION), config.COST_VISION)
+        except Exception as e:
+            print(f"[pipeline] style description failed: {e}")
+            return ""
+        row.data = {**(row.data or {}), "golden_style": txt, "golden_sig": sig}
+        s.commit()
+        return txt
+    return ""
+
+
+LOCK = ("\n\n[PRODUCT LOCK - overrides everything above]\nThe product must be identical to the real photos: same shape, "
+        "proportions, colours, pattern and its placement, logo, every printed word, number and order of items. Never "
+        "redesign, simplify, recolour or re-letter it, and never show a side that the photos do not show. "
+        "\n[REALISM]\nIt must look like a real photo taken in our own studio: real materials, real scale, natural "
+        "shadows. Props are plain, unbranded, real everyday objects: no logos, no brand names, no other products of "
+        "any brand, no invented packaging. No text, captions or graphics that are not printed on the product.")
+ANCHOR = ("\n\n[CONSISTENCY WITH THE HERO]\nThe second image is our approved hero shot of this exact product. The "
+          "product in your picture must be indistinguishable from it: same design, same pattern placement, same "
+          "colours, same text. Keep the same face of the product towards the camera and the same orientation; you "
+          "may move the camera higher, closer or farther, but do not rotate the product to reveal unseen sides.")
+
+
 def style_reference(s: Session, p: Product) -> bytes | None:
     """One approved 'golden' shot: the brand's, or for unbranded / no-profile products the category's."""
     from .dataset import is_unbranded
@@ -179,7 +228,8 @@ def process(pid: int, only: list[int] | None = None):
         if (p.data or {}).get("v2"):                    # shoot sheet: only the shots it asks for
             from .v2 import requested_shots
             defaults = requested_shots(s, p)
-        style = style_reference(s, p)
+        style = None                                      # golden shots go in as words, never as pictures
+        style_note = style_text(s, p, prov)
         accurate = bool((p.data or {}).get("lib_key")) and get_setting(s, "engine_mode", "accurate") == "accurate"
         angle_raw = {}
         if (p.data or {}).get("lib_key"):
@@ -215,8 +265,7 @@ def process(pid: int, only: list[int] | None = None):
             prompt = spec["prompt"]
             shot_raw = raw
             if angle_raw:
-                want = {"hero": ("front", "angle"), "detail": ("detail", "front"), "use_case": ("angle", "side", "in_use", "front"),
-                        "lifestyle": ("angle", "side", "front")}.get(sh.kind, ("front",))
+                want = ("front", "unknown", "angle", "side")       # every shot starts from the same main photo as the hero
                 rel = next((angle_raw[a] for a in want if a in angle_raw), None)
                 if rel:
                     try:
@@ -228,6 +277,39 @@ def process(pid: int, only: list[int] | None = None):
             if mem.get("facts"):
                 from .dataset import memory_block
                 facts = memory_block(mem).split("\n", 1)[-1].replace("\n", "; ")
+            hero_ref = None
+            h = shots.get(1)
+            if no != 1 and h is not None and h.image_path and h.status in ("pass", "approved", "unchecked"):
+                try:
+                    hero_ref = storage.read(h.image_path)
+                except Exception:
+                    hero_ref = None
+            card = shot_card(s, p, sh.kind)
+            cl = [f"{lbl}: {card[k]}" for k, lbl in (("scene", "Scene"), ("background", "Background / surface"),
+                  ("props", "Props (plain, unbranded, real objects)"), ("pose", "Hands / people / pose"),
+                  ("extra", "Extra")) if card.get(k)]
+            ang = {"flat": "Camera: top-down flat lay, the product lying on its back with the same face up as in the photos.",
+                   "photo": "Use the angle of the real 45-degree or side photo of this product."}.get(card.get("angle"), "")
+            used_photo = False
+            if card.get("angle") == "photo":
+                rel2 = next((angle_raw[a] for a in ("angle", "side") if a in angle_raw), None)
+                if rel2:
+                    try:
+                        shot_raw = storage.read(rel2)
+                        ang += " The first image shows that angle."
+                        used_photo = True
+                    except Exception:
+                        pass
+            if ang == "" or (card.get("angle") == "photo" and not any(a in angle_raw for a in ("angle", "side"))):
+                ang = "" if no != 1 else "Camera: the same angle as the main real photo."
+            if cl or ang:
+                spec = {**spec, "prompt": spec["prompt"] + "\n\n[BRAND SHOT CARD - follow this over the generic scene "
+                        "above]\n" + "\n".join(cl + ([ang] if ang else []))}
+            spec = {**spec, "prompt": spec["prompt"] + (f"\n\n[BRAND LOOK - light, colours and mood only, copy no "
+                                                         f"objects]\n{style_note}" if style_note else "")
+                    + LOCK + ((ANCHOR.replace("Keep the same face of the product towards the camera and the same orientation; you may move the camera higher, closer or farther, but do not rotate the product to reveal unseen sides.", "Show the product at the angle of the FIRST image (a real photo of that side).") if used_photo else ANCHOR) if hero_ref else "")}
+            prompt = spec["prompt"]
+            call_refs = ([hero_ref] if hero_ref else []) + refs[: (1 if hero_ref else 2)]
             result = None
             for attempt in range(retries + 1):
                 if STOP.is_set():
@@ -243,7 +325,7 @@ def process(pid: int, only: list[int] | None = None):
                     img, how = _render_accurate(s, p, sh, spec, prov, model, size, refs, style, angle_raw, facts,
                                                 prompt if attempt else "", shot_raw)
                 else:
-                    img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=refs, style=style))
+                    img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=call_refs, style=None))
                     used = getattr(prov, "last_model", None) or model     # may differ after a fallback
                     sh.model = used
                     _charge(s, p, "image", used, config.image_cost(used, size), sh)
@@ -252,7 +334,8 @@ def process(pid: int, only: list[int] | None = None):
                     result = {"checks": {"product_exact": True}, "reasons": {}, "how": how}
                 else:
                     try:
-                        result = prov.qc(shot_raw, img, {"kind": sh.kind, "no": no, "facts": facts}, rv.data)
+                        result = prov.qc(hero_ref or shot_raw, img, {"kind": sh.kind, "no": no, "facts": facts,
+                                         "vs_hero": bool(hero_ref)}, rv.data)
                         _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
                     except Exception as e:               # keep the image; a person checks it instead
                         print(f"[pipeline] QC failed for {p.code} shot {no}: {e}")

@@ -174,6 +174,29 @@ class GeminiProvider:
         reason = getattr(r.candidates[0], "finish_reason", "no image") if r.candidates else "no candidates"
         raise RuntimeError(f"Model returned no image ({reason})")
 
+    def describe_product(self, ctx: dict) -> str:
+        """Shopify description from the product memory only: no invented claims."""
+        import json as _j
+        r = self._call(MODEL_VISION, "vision", contents=[
+            "Write a Shopify product description in simple HTML (<p> and one <ul> of 3-5 <li>), 70-130 words, for: "
+            f"{ctx.get('title')} (brand {ctx.get('brand')}, type {ctx.get('type')}). Use ONLY these verified facts, never "
+            f"invent sizes, materials, counts or claims that are not listed: {_j.dumps(ctx.get('facts') or {}, ensure_ascii=False)[:3000]}. "
+            "Friendly, clear Indian-English retail tone. No price, no shipping, no emojis. Return only the HTML."])
+        h = (r.text or "").strip()
+        if h.startswith("```"):
+            h = h.strip("`").split("\n", 1)[-1].rsplit("```", 1)[0]
+        return h.strip()[:4000]
+
+    def describe_style(self, images: list[bytes]) -> str:
+        """Golden shots -> a short written style brief (light, backdrop, colours, composition, prop TYPES)."""
+        parts = [types.Part.from_bytes(data=b, mime_type=_mime(b)) for b in images]
+        r = self._call(MODEL_VISION, "vision", contents=parts + [
+            "These are reference photos of a brand's product photography. Write a style brief of at most 90 words for a "
+            "photographer: lighting, backdrop colours and surfaces, colour palette, camera angles, composition and the "
+            "TYPES of plain props used. Do not describe or name the products, logos or brand; describe props generically "
+            "(e.g. 'plain pencils', 'a small succulent'). Plain text, no lists."])
+        return (r.text or "").strip()[:900]
+
     def study(self, images: list[bytes], ctx: dict) -> dict:
         """Product memory: study every photo of one product once and return exact facts as JSON."""
         prompt = (
@@ -197,6 +220,11 @@ class GeminiProvider:
             "attention_70_30: product is the clear focal point. props_ok: at most 5 props, none branded, realistic scale. "
             "no_artifacts: no extra text, watermark, warped hands or geometry. margin_ok: product not cropped, clear margin."
         )
+        if shot.get("vs_hero"):
+            prompt += ("\nIMPORTANT: image 1 is our APPROVED HERO shot of this exact product. The product in image 2 must be "
+                       "the identical product: same design, pattern and print placement, colours, logo and text. Any "
+                       "redesign, re-drawn pattern, different colourway or different product shape fails shape_match "
+                       "and label_text. props_ok also fails if any prop shows a logo, a brand name or another product.")
         if shot.get("facts"):
             prompt += ("\nVerify against these known PRODUCT FACTS (from the real product): " + shot["facts"] +
                        "\nlabel_text fails if any listed text is misspelt, missing or extra text was invented. "

@@ -13,6 +13,12 @@ class MockProvider:
     def test(self) -> str:
         return "Mock provider active (AI_PROVIDER=mock). No real API calls are made."
 
+    def describe_product(self, ctx):
+        return f"<p>{ctx.get('title')}</p><ul><li>By {ctx.get('brand')}</li></ul>"
+
+    def describe_style(self, images):
+        return "Soft daylight, colour-block paper backdrops, top-down and 30 degree angles, plain pencils and a small plant."
+
     def analyse(self, raw: bytes, context: dict) -> dict:
         p = context["product"]
         return {"sku": p.get("code"), "brand_id": p.get("brand_id") or "_default", "category_id": p.get("category_id"),

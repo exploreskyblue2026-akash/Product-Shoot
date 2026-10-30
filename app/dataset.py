@@ -108,6 +108,25 @@ def seed(s: Session, owner_email: str, owner_hash: str):
     if not get_setting(s, "preset_engine_v2", False) and os.environ.get("SKIP_PRESETS") != "1":
         set_setting(s, "engine_mode", "classic")
         set_setting(s, "preset_engine_v2", True)
+    if not get_setting(s, "rules_v3", False) and os.environ.get("SKIP_PRESETS") != "1":
+        live = live_rules(s)
+        if live is not None:                          # new live version; the old one stays under Versions
+            d = dict(live.data or {})
+            d["shot_directions"] = _read_json("shot_directions.json")
+            d["prompt_template"] = (DATA_DIR / "static" / "prompt_template.txt").read_text(encoding="utf-8")
+            top = max(v.version for v in s.scalars(select(RuleVersion)))
+            live.status = "archived"
+            s.add(RuleVersion(version=top + 1, status="live", created_by="Oct 30 shot rules", data=d))
+        for k, v in {"cost_mode": "max", "engine_mode": "classic"}.items():
+            set_setting(s, k, v)
+        set_setting(s, "rules_v3", True)
+    if not get_setting(s, "recheck_matches_v1", False) and os.environ.get("SKIP_PRESETS") != "1":
+        from .library import recheck_matches
+        try:
+            recheck_matches(s)
+        except Exception as e:
+            print(f"[seed] match re-check failed: {e}")
+        set_setting(s, "recheck_matches_v1", True)
     if not s.scalars(select(User).where(User.email == owner_email)).first():
         s.add(User(email=owner_email, role="owner", password_hash=owner_hash, active=True))
     s.commit()

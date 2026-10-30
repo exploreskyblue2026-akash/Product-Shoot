@@ -57,10 +57,12 @@ def test() -> str:
 
 
 def _find(q: str) -> dict | None:
-    d = _call("""query($q:String!){ productVariants(first:2, query:$q){ nodes{ sku barcode
+    d = _call("""query($q:String!){ productVariants(first:2, query:$q){ nodes{ id sku barcode
         product{ id title status media(first:50){ nodes{ alt } } } } } }""", {"q": q})
     nodes = d["productVariants"]["nodes"]
-    return nodes[0]["product"] if len(nodes) >= 1 else None
+    if not nodes:
+        return None
+    return {**nodes[0]["product"], "_variant": nodes[0].get("id", "")}
 
 
 def find_product(barcode: str = "", skus: list[str] | None = None) -> tuple[dict | None, str]:
@@ -95,15 +97,16 @@ def _staged_upload(name: str, data: bytes) -> str:
 def create_draft(info: dict) -> str:
     d = _call("""mutation($p:ProductCreateInput!){ productCreate(product:$p){ product{ id variants(first:1){ nodes{ id } } }
         userErrors{ message } } }""",
-              {"p": {"title": info["title"], "status": "DRAFT", "vendor": info.get("vendor", ""),
-                     "productType": info.get("type", ""), "tags": ["skyblue-studio"] + info.get("tags", [])}})
+              {"p": {k: v for k, v in {"title": info["title"], "status": "DRAFT", "vendor": info.get("vendor", ""),
+                     "productType": info.get("type", ""), "tags": ["skyblue-studio"] + info.get("tags", []),
+                     "descriptionHtml": info.get("description") or None, "category": info.get("category_id") or None,
+                     "templateSuffix": info.get("template") or None}.items() if v not in (None, "")}})
     errs = d["productCreate"]["userErrors"]
     if errs:
         raise RuntimeError(errs[0]["message"])
     prod = d["productCreate"]["product"]
     variant = {"id": prod["variants"]["nodes"][0]["id"]}
-    if info.get("price"):
-        variant["price"] = str(info["price"])
+    # price and inventory are never set by the tool
     if info.get("barcode"):
         variant["barcode"] = info["barcode"]
     if info.get("sku"):
@@ -142,3 +145,74 @@ def download(url: str) -> bytes:
     r = httpx.get(url, timeout=60, follow_redirects=True)
     r.raise_for_status()
     return r.content
+
+
+# ---------------------------------------------------------------- field-level sync (preview, then apply)
+PRODUCT_Q = """query($id:ID!){ product(id:$id){ id title descriptionHtml productType vendor tags templateSuffix status
+    category{ id fullName } collections(first:50){ nodes{ id title } }
+    variants(first:100){ nodes{ id sku barcode } } media(first:50){ nodes{ alt } } } }"""
+
+
+def get_product(pid: str) -> dict:
+    return _call(PRODUCT_Q, {"id": pid})["product"]
+
+
+def find_category(name: str) -> dict | None:
+    """Shopify's standard product taxonomy: best match for a category name, e.g. 'Pencil Cases'."""
+    if not name:
+        return None
+    d = _call("""query($q:String!){ taxonomy{ categories(first:1, search:$q){ nodes{ id fullName } } } }""", {"q": name})
+    n = d["taxonomy"]["categories"]["nodes"]
+    return n[0] if n else None
+
+
+def find_collections(titles: list[str]) -> tuple[list[dict], list[str]]:
+    """Existing collections only (never created). Returns (found, not_found)."""
+    found, missing = [], []
+    for title in titles:
+        d = _call("""query($q:String!){ collections(first:5, query:$q){ nodes{ id title } } }""",
+                  {"q": f'title:"{title}"'})
+        hit = next((c for c in d["collections"]["nodes"] if c["title"].strip().lower() == title.strip().lower()), None)
+        (found.append(hit) if hit else missing.append(title))
+    return found, missing
+
+
+def apply(pid: str, variant_id: str, changes: dict, add_collections: list[str]):
+    """Write only the planned fields. Never price, never inventory."""
+    allowed = {"title", "descriptionHtml", "productType", "vendor", "tags", "category", "templateSuffix"}
+    prod = {k: v for k, v in changes.items() if k in allowed}
+    if prod:
+        d = _call("""mutation($p:ProductUpdateInput!){ productUpdate(product:$p){ userErrors{ field message } } }""",
+                  {"p": {"id": pid, **prod}})
+        errs = d["productUpdate"]["userErrors"]
+        if errs:
+            raise RuntimeError(f"{errs[0].get('field')}: {errs[0]['message']}")
+    var = {}
+    if "barcode" in changes:
+        var["barcode"] = changes["barcode"]
+    if "sku" in changes:
+        var["inventoryItem"] = {"sku": changes["sku"]}
+    if var and variant_id:
+        d = _call("""mutation($p:ID!,$v:[ProductVariantsBulkInput!]!){ productVariantsBulkUpdate(productId:$p, variants:$v){
+            userErrors{ message } } }""", {"p": pid, "v": [{"id": variant_id, **var}]})
+        errs = d["productVariantsBulkUpdate"]["userErrors"]
+        if errs:
+            raise RuntimeError(errs[0]["message"])
+    for cid in add_collections:
+        d = _call("""mutation($id:ID!,$p:[ID!]!){ collectionAddProducts(id:$id, productIds:$p){ userErrors{ message } } }""",
+                  {"id": cid, "p": [pid]})
+        errs = d["collectionAddProducts"]["userErrors"]
+        if errs and "already" not in errs[0]["message"].lower():
+            raise RuntimeError(errs[0]["message"])
+
+
+def add_media(pid: str, images: list[tuple[str, bytes, str]], existing_alts: set) -> tuple[int, int]:
+    todo = [(n, b, alt) for n, b, alt in images if alt not in existing_alts]
+    if todo:
+        media = [{"originalSource": _staged_upload(n, b), "alt": alt, "mediaContentType": "IMAGE"} for n, b, alt in todo]
+        d = _call("""mutation($id:ID!,$m:[CreateMediaInput!]!){ productCreateMedia(productId:$id, media:$m){
+            mediaUserErrors{ message } } }""", {"id": pid, "m": media})
+        errs = d["productCreateMedia"]["mediaUserErrors"]
+        if errs:
+            raise RuntimeError(errs[0]["message"])
+    return len(todo), len(images) - len(todo)

@@ -540,20 +540,34 @@ def test_product_memory_quality_gate_and_learning():
 
 
 def test_shopify_queue_push_by_barcode_and_draft():
-    import time
+    import io, time, json as _j
     from app.connectors import shopify
     c = client()
     calls = []
-    store = {"barcode:EXIST": {"id": "gid://shopify/Product/1", "title": "x", "status": "ACTIVE", "media": {"nodes": []}}}
+    prod1 = {"id": "gid://shopify/Product/1", "title": "Existing title", "descriptionHtml": "", "productType": "",
+             "vendor": "", "tags": ["old"], "templateSuffix": None, "status": "ACTIVE", "category": None,
+             "collections": {"nodes": []}, "variants": {"nodes": [{"id": "v9", "sku": "", "barcode": "EXIST"}]},
+             "media": {"nodes": []}}
+    store = {"barcode:EXIST": prod1}
     def fake_call(q, v=None):
-        calls.append((q.split("(")[0].strip()[:40], v))
+        calls.append((q, v))
         if "productVariants(first:2" in q:
             p = store.get(v["q"])
-            return {"productVariants": {"nodes": [{"sku": "", "barcode": "", "product": p}] if p else []}}
+            return {"productVariants": {"nodes": [{"id": "v9", "sku": "", "barcode": "", "product": p}] if p else []}}
+        if "product(id:" in q:
+            return {"product": prod1 if v["id"].endswith("/1") else {**prod1, "id": v["id"], "media": {"nodes": []}}}
+        if "taxonomy" in q:
+            return {"taxonomy": {"categories": {"nodes": [{"id": "gid://shopify/TaxonomyCategory/os-1", "fullName": "Office Supplies > Pencil Cases"}]}}}
+        if "collections(first:5" in q:
+            return {"collections": {"nodes": [{"id": "gid://shopify/Collection/7", "title": "School"}] if "School" in v["q"] else []}}
         if "stagedUploadsCreate" in q:
             return {"stagedUploadsCreate": {"stagedTargets": [{"url": "https://up", "resourceUrl": "https://res/1", "parameters": []}]}}
         if "productCreateMedia" in q:
             return {"productCreateMedia": {"mediaUserErrors": []}}
+        if "productUpdate(" in q:
+            return {"productUpdate": {"userErrors": []}}
+        if "collectionAddProducts" in q:
+            return {"collectionAddProducts": {"userErrors": []}}
         if "productCreate(" in q:
             return {"productCreate": {"product": {"id": "gid://shopify/Product/2", "variants": {"nodes": [{"id": "v1"}]}}, "userErrors": []}}
         if "productVariantsBulkUpdate" in q:
@@ -564,9 +578,25 @@ def test_shopify_queue_push_by_barcode_and_draft():
         def raise_for_status(self): pass
     shopify._call, shopify.httpx.post = fake_call, (lambda *a, **k: R())
     try:
-        q = c.get("/api/shopify/queue").json()["items"]
-        assert q, "approved products from earlier tests should be waiting"
-        ids = [x["id"] for x in q[:2]]
+        q = c.get("/api/shopify/queue").json()
+        assert q["items"] and q["listing"]["count"] == 0 and q["in_sheet_not_ready"] == []
+        ids = [x["id"] for x in q["items"][:2]]
+        # listing sheet: first product listed with category + collections; one code that is not ready
+        import openpyxl
+        wb = openpyxl.Workbook(); ws = wb.active
+        ws.append(["Code", "Category", "Collections", "Tags"])
+        ws.append([q["items"][0]["code"], "Pencil cases", "School | Not-a-collection", "back-to-school"])
+        ws.append(["BBL64/BK", "", "", ""])
+        b = io.BytesIO(); wb.save(b)
+        assert c.post("/api/shopify/listing", files={"file": ("list.xlsx", b.getvalue(), "x/y")}).json()["products"] == 2
+        q = c.get("/api/shopify/queue").json()
+        assert [x["id"] for x in q["ready_in_sheet"]] == [ids[0]] and ids[1] in [x["id"] for x in q["ready_not_in_sheet"]]
+        assert any(x["code"] in ("BBL64/BK", "BBL64BK") for x in q["in_sheet_not_ready"])
+        pv = c.get(f"/api/shopify/preview/{ids[0]}").json()
+        assert "rows" in pv, pv
+        acts = {r["field"]: r["action"] for r in pv["rows"]}
+        assert acts["Price / inventory"] == "none" and acts["Category"] in ("fill", "same")
+        assert not any("productUpdate" in x[0] or "productCreate" in x[0] for x in calls)      # preview writes nothing
         assert c.post("/api/shopify/push", json={"ids": ids}).json()["ok"]
         for _ in range(100):
             j = c.get("/api/shopify/queue").json()
@@ -574,14 +604,19 @@ def test_shopify_queue_push_by_barcode_and_draft():
                 break
             time.sleep(0.05)
         done = {x["id"]: x for x in c.get("/api/shopify/queue").json()["items"]}
-        assert all(done[i]["shopify_status"] == "pushed" for i in ids), [(done[i].get("shopify_status"), done[i].get("shopify_error"), j["job"]) for i in ids]
+        assert all(done[i]["shopify_status"] == "pushed" for i in ids), [(done[i].get("shopify_status"), done[i].get("shopify_error")) for i in ids]
         assert any("new draft" in done[i]["shopify_how"] for i in ids)
+        sent = _j.dumps([x[1] for x in calls])
+        assert '"price"' not in sent and "inventoryQuantit" not in sent           # never price or stock
+        assert '"collectionAddProducts"' not in sent and any("collectionAddProducts" in x[0] and x[1]["id"].endswith("/7") for x in calls)
+        assert not any("collectionCreate" in x[0] for x in calls)                 # existing collections only
         # pushing again never re-uploads shots that are already on the product
         info = {"title": "T", "barcode": "EXIST", "skus": []}
         store["barcode:EXIST"]["media"]["nodes"] = [{"alt": "A | Hero"}]
         r = shopify.push(info, [("a.jpg", b"x", "A | Hero"), ("b.jpg", b"y", "A | Detail")])
         assert r == {"product_id": "gid://shopify/Product/1", "how": "barcode EXIST", "added": 1, "skipped": 1}
         assert c.get("/shopify").status_code == 200
+        c.delete("/api/shopify/listing")
     finally:
         shopify._call, shopify.httpx.post = orig_call, orig_post
 
@@ -714,3 +749,32 @@ def test_product_kit_angles_need_approval():
     assert pend[0]["angle"] in angles and pend[1]["angle"] not in angles
     row = next(r for r in c.get("/api/library").json()["rows"] if r["code"] == "KR18-05/BR")
     assert row["kit"]["missing"] == [pend[1]["angle"]] and not row["kit"]["pending"]
+
+
+def test_shots_2_to_4_are_anchored_to_the_approved_hero():
+    from app.providers import mock
+    c = client()
+    c.put("/api/admin/settings", json={"default_shots": [1], "max_cost_product": 5, "daily_budget": 100,
+                                       "hero_gate": True, "qc_mode": "light", "cost_mode": "max"})
+    c.post("/api/autopilot", json={"autopilot": False})
+    p = SAMPLES / "WAT-HEM-SSGT_front.png"
+    c.post("/api/sources/upload", files=[("files", ("ANCHOR-1_front.jpg", p.read_bytes(), "image/jpeg"))])
+    pid = {x["code"]: x["id"] for x in c.get("/api/state").json()["queue"]}["ANCHOR-1"]
+    seen = []
+    og = mock.MockProvider.generate
+    def spy(self, prompt, raw, model, size="1K", refs=None, style=None):
+        seen.append({"prompt": prompt, "refs": len(refs or []), "style": style, "model": model})
+        return og(self, prompt, raw, model, size, refs, style)
+    mock.MockProvider.generate = spy
+    try:
+        c.post(f"/api/products/{pid}/run"); pipeline.tick()
+        hero_prompt = seen[0]["prompt"]
+        assert "[PRODUCT LOCK" in hero_prompt and "[CONSISTENCY WITH THE HERO]" not in hero_prompt
+        c.post(f"/api/products/{pid}/approve", json={}); pipeline.tick()
+        later = seen[1:]
+        assert len(later) == 3
+        for g in later:
+            assert "[CONSISTENCY WITH THE HERO]" in g["prompt"] and g["refs"] >= 1 and g["style"] is None
+            assert "pro" in g["model"]                     # Max mode: the best model for every shot
+    finally:
+        mock.MockProvider.generate = og

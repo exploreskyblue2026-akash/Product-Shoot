@@ -1063,11 +1063,58 @@ def shopify_page(u=Depends(need("editor"))):
 def shopify_queue(u=Depends(need("viewer"))):
     from . import shopq
     with SessionLocal() as s:
-        return {"items": shopq.queue(s), "job": dict(_shop_job)}
+        q = shopq.queue(s)
+        return {**q, "items": q["ready_in_sheet"] + q["ready_not_in_sheet"], "job": dict(_shop_job)}
+
+
+@app.post("/api/shopify/listing")
+async def shopify_listing(file: UploadFile = File(...), u=Depends(need("editor"))):
+    from . import shopq
+    data = await file.read()
+    with SessionLocal() as s:
+        try:
+            return {"ok": True, **shopq.load_listing(s, data, file.filename or "listing.xlsx")}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+
+@app.delete("/api/shopify/listing")
+def shopify_listing_clear(u=Depends(need("editor"))):
+    with SessionLocal() as s:
+        set_setting(s, "shopify_listing", {})
+        s.commit()
+    return {"ok": True}
+
+
+class TemplateIn(BaseModel):
+    template: str = ""
+
+
+@app.put("/api/shopify/template")
+def shopify_template(body: TemplateIn, u=Depends(need("editor"))):
+    with SessionLocal() as s:
+        set_setting(s, "shopify_template", body.template.strip())
+        s.commit()
+    return {"ok": True}
+
+
+@app.get("/api/shopify/preview/{pid}")
+def shopify_preview(pid: int, overwrite: bool = False, u=Depends(need("editor"))):
+    from . import shopq
+    with SessionLocal() as s:
+        p = s.get(Product, pid)
+        if not p:
+            raise HTTPException(404, "Not found")
+        try:
+            pl = shopq.plan(s, p, overwrite)
+        except Exception as e:
+            raise HTTPException(502, f"Shopify: {str(e)[:300]}")
+        return {"code": p.code, "name": p.name, "found": pl["found"], "how": pl["how"], "rows": pl["rows"]}
 
 
 class PushIn(BaseModel):
     ids: list[int]
+    overwrite: bool = False
 
 
 @app.post("/api/shopify/push")
@@ -1086,9 +1133,11 @@ def shopify_push(body: PushIn, u=Depends(need("editor"))):
                     if not p:
                         continue
                     try:
-                        shopq.push_one(s, p)
+                        shopq.push_one(s, p, body.overwrite)
                         ok += 1
                     except Exception as e:
+                        s.rollback()
+                        p = s.get(Product, pid)
                         p.data = {**(p.data or {}), "shopify": {"status": "failed", "error": str(e)[:300]}}
                         s.commit()
                         fail += 1
