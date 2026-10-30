@@ -330,7 +330,14 @@ def process(pid: int, only: list[int] | None = None):
                     img, how = _render_accurate(s, p, sh, spec, prov, model, size, refs, style, angle_raw, facts,
                                                 prompt if attempt else "", shot_raw)
                 else:
-                    img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=call_refs, style=None))
+                    try:
+                        img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=call_refs, style=None))
+                    except Exception as e:                    # model unavailable / refused: use the upgrade model once
+                        if not escalate or escalated or escalate == model:
+                            raise
+                        print(f"[pipeline] {model} failed for {p.code} shot {no}, using {escalate}: {str(e)[:160]}")
+                        model, escalated = escalate, True
+                        img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=call_refs, style=None))
                     used = getattr(prov, "last_model", None) or model     # may differ after a fallback
                     sh.model = used
                     _charge(s, p, "image", used, config.image_cost(used, size), sh)

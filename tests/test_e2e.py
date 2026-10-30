@@ -806,3 +806,27 @@ def test_per_shot_model_and_upgrade_on_qc_fail():
     finally:
         mock.MockProvider.generate, mock.MockProvider.qc = og, oq
         c.put("/api/admin/settings", json={"model_hero": "", "escalate_model": ""})
+
+
+def test_model_error_falls_back_to_upgrade_model():
+    from app.providers import mock
+    c = client()
+    c.put("/api/admin/settings", json={"default_shots": [1], "max_cost_product": 5, "daily_budget": 100, "retries": 0,
+                                       "qc_mode": "light", "model_hero": "openrouter:black-forest-labs/flux.2-pro:free",
+                                       "escalate_model": "gemini-3-pro-image"})
+    c.post("/api/autopilot", json={"autopilot": False})
+    c.post("/api/sources/upload", files=[("files", ("ERR-1_front.jpg", (SAMPLES / "WAT-HEM-SSGT_front.png").read_bytes(), "image/jpeg"))])
+    pid = {x["code"]: x["id"] for x in c.get("/api/state").json()["queue"]}["ERR-1"]
+    og = mock.MockProvider.generate
+    def spy(self, prompt, raw, model, size="1K", refs=None, style=None):
+        if model.startswith("openrouter:"):
+            raise RuntimeError("OpenRouter failed (404)")
+        return og(self, prompt, raw, model, size, refs, style)
+    mock.MockProvider.generate = spy
+    try:
+        c.post(f"/api/products/{pid}/run"); pipeline.tick()
+        j = c.get(f"/api/products/{pid}").json()
+        assert j["shots"][0]["image"] and j["shots"][0]["model"] == "gemini-3-pro-image" and "404" not in (j.get("error") or "")
+    finally:
+        mock.MockProvider.generate = og
+        c.put("/api/admin/settings", json={"model_hero": "", "escalate_model": ""})
