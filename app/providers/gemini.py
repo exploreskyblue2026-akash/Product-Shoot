@@ -29,6 +29,11 @@ def _json(text: str) -> dict:
 
 def _pick(names: list[str], kind: str) -> str | None:
     bad = ("tts", "live", "embedding", "transcribe", "robotics", "lite", "aqa", "omni")
+    if kind == "planner":                                   # analysis: Pro-level text/vision models only
+        pro = [n for n in names if "pro" in n and not any(b in n for b in bad + ("image", "vision", "computer"))
+               and not n.startswith(("gemini-1.", "gemini-2."))]
+        pro.sort(key=lambda n: ("preview" in n or "exp" in n, [-int(x) if x.isdigit() else 0 for x in n.replace("-", ".").split(".")]))
+        return pro[0] if pro else None
     if kind == "image":
         # cheapest first; never switch to the Pro image model automatically
         pref = [n for n in names if ("banana" in n or "image" in n) and "imagen" not in n and "pro" not in n
@@ -180,6 +185,22 @@ class GeminiProvider:
                     return part.inline_data.data
         reason = getattr(r.candidates[0], "finish_reason", "no image") if r.candidates else "no candidates"
         raise RuntimeError(f"Model returned no image ({reason})")
+
+    def plan_product(self, images: list[bytes], prompt: str, model: str = "") -> tuple[dict, str]:
+        """Analysis + 4 shot plans in ONE call with the best available Pro model (never a cheaper one)."""
+        m = model or _pick(self._available(), "planner")
+        if not m:
+            raise RuntimeError("No Gemini Pro text model is available on this API key; set one in Admin → Planner model.")
+        parts = [types.Part.from_bytes(data=b, mime_type=_mime(b)) for b in images]
+        cfg = types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2)
+        try:
+            r = self._call(m, "planner", contents=parts + [prompt], config=cfg)
+        except Exception as e:
+            if "400" in str(e) and "mime" in str(e).lower():
+                r = self._call(m, "planner", contents=parts + [prompt + "\nReturn JSON only."])
+            else:
+                raise
+        return _json(r.text), getattr(self, "last_model", m)
 
     def describe_product(self, ctx: dict) -> str:
         """Shopify description from the product memory only: no invented claims."""

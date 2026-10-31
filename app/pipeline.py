@@ -235,11 +235,31 @@ def process(pid: int, only: list[int] | None = None):
         style_note = style_text(s, p, prov)
         accurate = bool((p.data or {}).get("lib_key")) and get_setting(s, "engine_mode", "accurate") == "accurate"
         angle_raw = {}
+        plan = None
         if (p.data or {}).get("lib_key"):
             from . import library as lib
             key = p.data["lib_key"]
             lp = s.scalar(select(lib.LibProduct).where(lib.LibProduct.key == key))
-            if lp is not None and not ((lp.data or {}).get("memory") or {}).get("facts"):
+            plan = None
+            if lp is not None and get_setting(s, "planner_on", True) and not accurate:
+                from . import planner
+                rec = (lp.data or {}).get("plan")
+                if not rec or rec.get("stale") or rec.get("status") != "ok":
+                    rec = planner.make_plan(s, key, prov, charge=lambda used: _charge(
+                        s, p, "plan", used, config.COST_PLANNER))  # one call, best model; errors stop this product
+                if rec.get("status") != "ok":
+                    p.stage, p.error = "error", "Every photo of this product was discarded by the analysis. Check the Library."
+                    s.commit()
+                    return
+                if planner.needs_review(s, rec):
+                    p.stage = "plan"
+                    p.error = "Shot plan needs your approval in the Library: " + ((rec.get("json") or {}).get("review_reason") or "flagged by the analysis")
+                    p.data = {k: v for k, v in (p.data or {}).items() if k not in ("run_now", "only_shots")}
+                    s.commit()
+                    return
+                plan = rec["json"]
+                static = planner.static_rules(s)
+            if lp is not None and plan is None and not ((lp.data or {}).get("memory") or {}).get("facts"):
                 try:                                       # study once (≈ ₹0.3), reused for every future shoot
                     lib.study_product(s, key, prov)
                     _charge(s, p, "memory", config.model_name(config.MODEL_VISION), config.COST_VISION * 2)
@@ -252,7 +272,10 @@ def process(pid: int, only: list[int] | None = None):
                 angle_raw.setdefault(r["angle"] or "unknown", r["path"])
             prompts = {x["no"]: x for x in build_prompts(s, p, p.analysis or {}, rv, notes)}   # now with product facts
         refs = []
-        for rel in ((p.data or {}).get("refs") or [])[1:]:   # extra angles of the same product from the Library
+        ref_paths = ((p.data or {}).get("refs") or [])[1:]
+        if angle_raw:                                     # only verified (not discarded) photos of this exact code
+            ref_paths = list(dict.fromkeys(angle_raw.values()))[1:]
+        for rel in ref_paths:   # extra angles of the same product from the Library
             try:
                 refs.append(storage.read(rel))
             except Exception:
@@ -287,7 +310,20 @@ def process(pid: int, only: list[int] | None = None):
                     hero_ref = storage.read(h.image_path)
                 except Exception:
                     hero_ref = None
-            card = shot_card(s, p, sh.kind)
+            if plan is not None:
+                mem_ok = (p.data or {}).get("memory") or {}
+                approved = ""
+                if mem_ok.get("approved") and mem_ok.get("facts"):
+                    from .dataset import memory_block
+                    approved = memory_block(mem_ok).replace("[PRODUCT FACTS: reproduce exactly, these override anything else]",
+                                                            "[PRODUCT FACTS approved by a person: these override anything else]")
+                spec = {**spec, "prompt": planner.render(plan, sh.kind, static, anchored=bool(hero_ref), approved_facts=approved)
+                        + (f"\n\nREVIEWER ADJUSTMENT (highest priority, never change the product): {spec['fill'].get('reviewer_note')}"
+                           if (spec.get("fill") or {}).get("reviewer_note") else "")}
+                facts = planner.qc_facts(plan) + ("; " + facts if facts else "")
+                prompt = spec["prompt"]
+                call_refs = ([hero_ref] if hero_ref else []) + refs[: (1 if hero_ref else 2)]
+            card = {} if plan is not None else shot_card(s, p, sh.kind)
             cl = [f"{lbl}: {card[k]}" for k, lbl in (("scene", "Scene"), ("background", "Background / surface"),
                   ("props", "Props (plain, unbranded, real objects)"), ("pose", "Hands / people / pose"),
                   ("extra", "Extra")) if card.get(k)]
@@ -305,10 +341,11 @@ def process(pid: int, only: list[int] | None = None):
                         pass
             if ang == "" or (card.get("angle") == "photo" and not any(a in angle_raw for a in ("angle", "side"))):
                 ang = "" if no != 1 else "Camera: the same angle as the main real photo."
-            if cl or ang:
+            if plan is None and (cl or ang):
                 spec = {**spec, "prompt": spec["prompt"] + "\n\n[BRAND SHOT CARD - follow this over the generic scene "
                         "above]\n" + "\n".join(cl + ([ang] if ang else []))}
-            spec = {**spec, "prompt": spec["prompt"] + (f"\n\n[BRAND LOOK - light, colours and mood only, copy no "
+            if plan is None:
+              spec = {**spec, "prompt": spec["prompt"] + (f"\n\n[BRAND LOOK - light, colours and mood only, copy no "
                                                          f"objects]\n{style_note}" if style_note else "")
                     + LOCK + ((ANCHOR.replace("Keep the same face of the product towards the camera and the same orientation; you may move the camera higher, closer or farther, but do not rotate the product to reveal unseen sides.", "Show the product at the angle of the FIRST image (a real photo of that side).") if used_photo else ANCHOR) if hero_ref else "")}
             prompt = spec["prompt"]

@@ -830,3 +830,77 @@ def test_model_error_falls_back_to_upgrade_model():
     finally:
         mock.MockProvider.generate = og
         c.put("/api/admin/settings", json={"model_hero": "", "escalate_model": ""})
+
+
+def test_planner_verifies_photos_plans_shots_and_gates_review():
+    """One best-model call per product: wrong photos go to Discarded, 4 shot plans are stored, prompts are rendered
+    from the plan (labelled sentences, never JSON), risky plans wait for approval, new photos make the plan stale."""
+    import io, openpyxl
+    from PIL import Image, ImageDraw
+    from app.providers import mock
+    from app.db import SessionLocal, LibProduct
+    from sqlalchemy import select
+    c = client()
+    c.post("/api/library/clear")
+    c.put("/api/admin/settings", json={"engine_mode": "classic", "planner_on": True, "plan_review": "flagged",
+                                       "max_cost_product": 5, "daily_budget": 100, "default_shots": [1], "hero_gate": False,
+                                       "retries": 0, "model_hero": "", "escalate_model": ""})
+    LIB = Path(__file__).parent / "library"
+    def photo(col):
+        im = Image.new("RGB", (1600, 2000), col); ImageDraw.Draw(im).rectangle([400, 500, 1200, 1500], fill=(20, 20, 20))
+        b = io.BytesIO(); im.save(b, "JPEG", quality=92); return b.getvalue()
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["SHOOT", "SHOTS"]); ws.append(["KR18/05/BR", "1"])
+    b = io.BytesIO(); wb.save(b)
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "x/y")),
+                                         ("files", ("plan_shoot.xlsx", b.getvalue(), "x/y")),
+                                         ("files", ("KR18-05-BR front.jpg", photo((240, 240, 240)), "image/jpeg")),
+                                         ("files", ("KR18-05-BR 2.jpg", photo((230, 30, 30)), "image/jpeg"))])
+    wait_job(c)
+    seen = []
+    og = mock.MockProvider.generate
+    def g(self, prompt, raw, model, size="1K", refs=None, style=None):
+        seen.append(prompt); return og(self, prompt, raw, model, size, refs, style)
+    mock.MockProvider.generate = g
+    try:
+        c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": True, "auto_approve": False})
+        c.post("/api/v2/load-shoot")
+        while pipeline.tick():
+            pass
+    finally:
+        mock.MockProvider.generate = og
+        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+    row = next(r for r in c.get("/api/library").json()["rows"] if r["code"] == "KR18-05/BR")
+    assert row["plan"]["status"] == "ok" and set(row["plan"]["json"]["shots"]) == {"hero", "detail", "use_case", "lifestyle"}
+    assert len(row["discarded"]) == 1 and len(row["all"]) == 1                    # the red one is another colourway
+    assert seen and "SHOT 1 · HERO" in seen[0] and "PRODUCT - DO NOT CHANGE" in seen[0] and '{"' not in seen[0]
+    # a new photo for this code makes the plan stale; restoring the discarded photo too
+    with SessionLocal() as s:
+        lp = s.scalar(select(LibProduct).where(LibProduct.key == row["key"]))
+        assert not lp.data["plan"]["stale"]
+    c.post(f"/api/library/images/{row['discarded'][0]['id']}", json={"action": "restore"})
+    row = next(r for r in c.get("/api/library").json()["rows"] if r["code"] == "KR18-05/BR")
+    assert row["plan"]["stale"] and len(row["all"]) == 2 and not row["discarded"]
+    # flagged plans wait for approval, approval releases them to the queue
+    import json as _j
+    plan = dict(row["plan"]["json"]); plan["review_needed"] = True; plan["review_reason"] = "fine text"
+    r = c.put(f"/api/library/products/{row['key']}/plan", json={"json_text": _j.dumps(plan)}).json()
+    assert r["plan"]["edited"] and not r["plan"]["approved"]
+    with SessionLocal() as s:
+        lp = s.scalar(select(LibProduct).where(LibProduct.key == row["key"]))
+        lp.data = {**lp.data, "plan": {**lp.data["plan"], "stale": False}}
+        s.commit()
+    from app.db import Product
+    with SessionLocal() as s:
+        p = next(x for x in s.scalars(select(Product)) if (x.data or {}).get("lib_key") == row["key"])
+        pid = p.id
+        p.stage = "queue"
+        for sh in p.shots:
+            sh.image_path, sh.status = "", "wait"
+        s.commit()
+    c.post(f"/api/products/{pid}/run"); pipeline.tick()
+    j = c.get(f"/api/products/{pid}").json()
+    assert j["stage"] == "plan" and "approval" in j["error"]
+    assert c.put(f"/api/library/products/{row['key']}/plan", json={"approved": True}).json()["released"] == 1
+    assert c.get(f"/api/products/{pid}").json()["stage"] == "queue"
+    assert c.put(f"/api/library/products/{row['key']}/plan", json={"json_text": "{bad"}).status_code == 400

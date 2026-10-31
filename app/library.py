@@ -325,6 +325,8 @@ def add_image(s: Session, data: bytes, name: str, source: str = "file", key: str
     s.flush()
     if key:
         pick_primary(s, key)
+        from .planner import mark_stale
+        mark_stale(s, key)                            # a new photo for this code: re-analyse before the next shoot
         if img.dup_of is None and not cutouts_on(s) and get_setting(s, "library_drive_copy", False):
             save_original_to_drive(s, img, data)
     return img
@@ -637,7 +639,9 @@ def report(s: Session) -> dict:
                      "primary": _img(prim) if prim else None, "notes": notes,
                      "shots": (sh or {}).get("shots", []), "note": (sh or {}).get("note", ""),
                      "priority": (sh or {}).get("priority"), "match": (sh or {}).get("match", ""),
-                     "all": [_img(i) for i in live], "memory": mem,
+                     "all": [_img(i) for i in live if not (i.meta or {}).get("discarded")],
+                     "discarded": [_img(i) for i in live if (i.meta or {}).get("discarded")], "memory": mem,
+                     "plan": ((p.data or {}).get("plan") if p else None),
                      "kit": kit_status(s, k) if live else {"missing": [], "pending": [], "real_angles": []}})
     unmatched = [_img(i) for i in by.get("", []) if i.dup_of is None]
     counts = {}
@@ -650,7 +654,7 @@ def report(s: Session) -> dict:
 def refs_with_angles(s: Session, key: str, limit: int = 4) -> list[dict]:
     live = [i for i in s.scalars(select(LibImage).where(LibImage.key == key, LibImage.dup_of.is_(None),
                                                          LibImage.cut_status != "skip"))
-            if (i.meta or {}).get("kit") in (None, "approved")]
+            if (i.meta or {}).get("kit") in (None, "approved") and not (i.meta or {}).get("discarded")]
     if any(i.source not in ("catalogue", "kit") for i in live):   # real photos of this exact code exist:
         live = [i for i in live if i.source != "catalogue"]         # never mix in catalogue pictures
     live.sort(key=lambda i: (not i.primary, i.source == "kit", bool((i.meta or {}).get("flags")), -(i.w * i.h)))
@@ -791,7 +795,7 @@ def _img(i: LibImage) -> dict:
             "w": i.w, "h": i.h, "status": i.cut_status, "note": i.cut_note, "name": i.src_name,
             "source": i.source, "primary": i.primary, "angle": (i.meta or {}).get("angle", ""),
             "flags": (i.meta or {}).get("flags", []), "sharpness": (i.meta or {}).get("sharpness"),
-            "kit": (i.meta or {}).get("kit", "")}
+            "kit": (i.meta or {}).get("kit", ""), "discarded": (i.meta or {}).get("discarded")}
 
 
 def report_csv(s: Session) -> str:

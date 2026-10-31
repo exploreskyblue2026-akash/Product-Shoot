@@ -13,6 +13,31 @@ class MockProvider:
     def test(self) -> str:
         return "Mock provider active (AI_PROVIDER=mock). No real API calls are made."
 
+    def plan_product(self, images, prompt, model=""):
+        """Deterministic plan; a photo whose average colour is far from the first one is 'another product'."""
+        from PIL import Image, ImageStat
+        import io as _io
+        means = [ImageStat.Stat(Image.open(_io.BytesIO(b)).convert("RGB").resize((32, 32))).mean for b in images]
+        photos = []
+        for n, m in enumerate(means):
+            far = sum(abs(a - b) for a, b in zip(m, means[0])) > 150
+            photos.append({"index": n, "is_this_product": not far, "usable": True, "angle": "front" if n == 0 else "angle",
+                           "reason_if_discarded": "different colourway" if far else ""})
+        shot = lambda k: {"goal": f"{k} goal", "scene": f"{k} scene", "surface": "light grey", "camera": "3/4, 85mm",  # noqa: E731
+                          "composition": "centred, 60%", "props": ["plain pencil"], "hands": "child" if k == "use_case" else "none",
+                          "product_state": "closed", "light": "soft", "notes": ""}
+        plan = {"photos": photos, "identity": {"type": "pencil case", "form": "box", "parts": ["zip"], "item_count": 1},
+                "appearance": {"colours": [{"name": "green", "hex": "#7ED957", "where": "front"}], "materials": ["canvas"],
+                               "finish": "matte", "pattern": "doodles", "printed_text": [{"text": "MILAN", "where": "patch"}],
+                               "logo": {"text": "MILAN", "form": "patch", "where": "lower centre"}, "hardware": ["2 zips"]},
+                "size": {"dimensions": "20 x 13 x 6 cm", "estimated": True, "scale_hint": "hand-held"},
+                "use": {"purpose": "school", "user": "kids", "how_used": "on a desk", "hands": "child", "goes_with": ["pencils"]},
+                "category": {"name": "stationery", "environment": "kid's study desk", "prop_types": ["pencils"], "mood": "playful"},
+                "hero_features": ["print", "patch"], "risks": ["pattern redrawn"], "must_keep": ["MILAN patch", "doodle print"],
+                "shots": {k: shot(k) for k in ("hero", "detail", "use_case", "lifestyle")},
+                "review_needed": "REVIEWME" in prompt, "review_reason": ""}
+        return plan, model or "gemini-3-pro-mock"
+
     def describe_product(self, ctx):
         return f"<p>{ctx.get('title')}</p><ul><li>By {ctx.get('brand')}</li></ul>"
 

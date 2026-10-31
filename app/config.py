@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.7.1 (model errors fall back to the upgrade model)"
+APP_VERSION = "3.8.0 (analysis + shot planning with the best model, Discarded photos, static/dynamic prompts)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
@@ -36,6 +36,7 @@ IMAGE_SIZE = env("IMAGE_SIZE", "2K")              # 1K | 2K | 4K
 COST_IMAGE_PRO = float(env("COST_IMAGE_PRO", "0.134"))
 COST_IMAGE_FAST = float(env("COST_IMAGE_FAST", "0.05"))
 COST_VISION = float(env("COST_VISION", "0.002"))
+COST_PLANNER = float(env("COST_PLANNER", "0.03"))      # analysis + 4 shot plans, best Pro model, once per product
 MODEL_IMAGE_LITE = env("MODEL_IMAGE_LITE", "gemini-3.1-flash-lite-image")
 COST_IMAGE_LITE = float(env("COST_IMAGE_LITE", "0.02"))
 # Estimated USD per image by model + size. Check Google's pricing page and override with COST_* variables.

@@ -51,6 +51,11 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
 .kitbox{border-top:1px solid var(--line);padding-top:8px;display:flex;flex-direction:column;gap:6px}
 .kitrow{display:grid;grid-template-columns:1fr 1fr;gap:8px}.kitrow figure{margin:0;display:flex;flex-direction:column;gap:4px}
 .kitrow img{width:100%;aspect-ratio:1;object-fit:contain;background:var(--sunk);border-radius:6px}.kitrow figcaption{font-size:12px;color:var(--muted)}
+.plan{border-top:1px solid var(--line);padding-top:8px}.plan summary{cursor:pointer;display:flex;gap:6px;align-items:center;font-size:13px;flex-wrap:wrap}
+.plan dl{display:grid;grid-template-columns:96px 1fr;gap:4px 8px;font-size:12px;margin:8px 0}.plan dt{color:var(--muted)}.plan dd{margin:0}
+.plan .sh{border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12px;margin:4px 0}.plan .sh b{display:block;margin-bottom:2px}
+.plan textarea{width:100%;min-height:220px;font-family:var(--f-mono,monospace);font-size:11px}
+.disc{display:flex;gap:6px;flex-wrap:wrap}.disc figure{margin:0;width:84px;font-size:10px;color:var(--muted)}.disc img{width:84px;height:84px;object-fit:cover;border-radius:4px;opacity:.6}
 .mem{border-top:1px solid var(--line);padding-top:8px}.mem summary{cursor:pointer;display:flex;gap:6px;align-items:center;font-size:13px}
 .memf{display:grid;gap:6px;margin-top:8px}.memf .field input{min-height:32px;padding:5px 8px;font-size:13px}
 .empty{color:var(--muted);font-size:14px;padding:12px 0}
@@ -88,7 +93,7 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
   </section>
 
   <section class="panel" aria-labelledby="h-prod">
-    <div class="panel-h"><h2 id="h-prod">3 · Products</h2><div class="acts"><button class="btn sm" id="study-all" type="button" title="Each product is studied once (≈ ₹0.3) and remembered">Study all shoot-sheet products</button><a class="btn sm" href="/api/library/report.csv" download>Download report (CSV)</a></div></div>
+    <div class="panel-h"><h2 id="h-prod">3 · Products</h2><div class="acts"><button class="btn sm primary" id="plan-all" type="button" title="Best model checks every photo, understands the product and plans its 4 shots (≈ ₹2-3 per product, once)">Analyse &amp; plan all queued products</button><a class="btn sm" href="/api/library/report.csv" download>Download report (CSV)</a></div></div>
     <div class="stats" id="stats"></div>
     <div class="grid" id="grid" style="margin-top:12px"></div>
   </section>
@@ -126,6 +131,24 @@ function kit(r){const k=r.kit||{missing:[],pending:[],real_angles:[]};const pend
   return `<div class="kitbox"><div class="hint"><b>Product Kit</b> · real angles: ${k.real_angles.length?esc(k.real_angles.join(", ")):"not tagged yet"}${appr.length?` · approved AI views: ${appr.map(i=>esc(i.angle)).join(", ")}`:""}</div>
   ${pend.length?`<div class="kitrow">${pend.map(i=>`<figure><img src="${esc(i.src)}" alt="AI ${esc(i.angle)} view"><figcaption>${esc(i.angle)} view</figcaption><div class="acts"><button class="btn sm primary" data-act="kit_approve" data-id="${i.id}" type="button">✓ Same product</button><button class="btn sm danger" data-act="kit_reject" data-id="${i.id}" type="button">✕ Not right</button></div></figure>`).join("")}</div>`:""}
   ${!pend.length&&k.missing.length?`<div class="acts"><button class="btn sm" data-kit="${esc(r.key)}" type="button" title="AI makes the missing views once; you approve them">Make ${k.missing.map(esc).join(" + ")} view${k.missing.length>1?"s":""} (≈ ₹${2*k.missing.length}, once)</button></div>`:""}</div>`}
+const SHN={hero:"1 · Hero",detail:"2 · Detail",use_case:"3 · Use case",lifestyle:"4 · Lifestyle"};
+const J=v=>Array.isArray(v)?v.map(x=>typeof x=="object"&&x?Object.values(x).filter(Boolean).join(" "):x).join(", "):typeof v=="object"&&v?Object.values(v).filter(Boolean).join(" · "):(v??"");
+function plan(r){const rec=r.plan;
+  if(!rec)return `<div class="acts"><button class="btn sm primary" data-plan="${esc(r.key)}" type="button" title="Best model: checks the photos, understands the product, plans the 4 shots">Analyse &amp; plan (≈ ₹2-3, once)</button></div>`;
+  const j=rec.json||{},flag=j.review_needed&&!rec.approved;
+  const chip=rec.status!="ok"?["bad","No usable photos"]:rec.stale?["warn","Photos changed: re-analyse"]:rec.approved?["ok","Plan approved"]:flag?["warn","Needs your approval"]:["info","Planned"];
+  const ap=j.appearance||{},u=j.use||{},cat=j.category||{};
+  return `<details class="plan"${flag||rec.stale?" open":""}><summary><b>Analysis &amp; shot plan</b><span class="chip ${chip[0]}">${chip[1]}</span><span class="hint">${esc(rec.model||"")}</span></summary>
+    ${flag?`<div class="note">Why: ${esc(j.review_reason||"flagged by the analysis")}</div>`:""}
+    <dl><dt>Product</dt><dd>${esc(J(j.identity))}</dd><dt>Printed text</dt><dd>${esc(J(ap.printed_text))}</dd><dt>Logo</dt><dd>${esc(J(ap.logo))}</dd>
+    <dt>Colours</dt><dd>${esc(J(ap.colours))}</dd><dt>Material</dt><dd>${esc(J(ap.materials))} ${esc(ap.finish||"")}</dd><dt>Size</dt><dd>${esc((j.size||{}).dimensions||"")}${(j.size||{}).estimated?" (estimated)":""}${(j.size||{}).scale_hint?" · "+esc(j.size.scale_hint):""}</dd>
+    <dt>User &amp; use</dt><dd>${esc(J(u))}</dd><dt>Setting</dt><dd>${esc(cat.environment||"")} · ${esc(cat.mood||"")}</dd>
+    <dt>Key features</dt><dd>${esc(J(j.hero_features))}</dd><dt>Risks</dt><dd>${esc(J(j.risks))}</dd><dt>Must keep</dt><dd>${esc(J(j.must_keep))}</dd></dl>
+    ${Object.entries(j.shots||{}).map(([k,s])=>`<div class="sh"><b>${SHN[k]||esc(k)}</b>${esc(s.goal||"")} · ${esc(s.scene||"")} on ${esc(s.surface||"")} · ${esc(s.camera||"")} · ${esc(s.composition||"")}<br>Props: ${esc(J(s.props))}${s.hands&&s.hands!="none"?` · Hands: ${esc(s.hands)}`:""}</div>`).join("")}
+    <details><summary class="hint">Edit plan (JSON)</summary><textarea data-pj="${esc(r.key)}" spellcheck="false">${esc(JSON.stringify(j,null,1))}</textarea><div class="acts"><button class="btn sm" data-psave="${esc(r.key)}" type="button">Save edits</button></div></details>
+    <div class="acts">${rec.approved?`<button class="btn sm" data-papprove="0" data-key="${esc(r.key)}" type="button">Un-approve</button>`:`<button class="btn sm primary" data-papprove="1" data-key="${esc(r.key)}" type="button">✓ Approve plan</button>`}<button class="btn sm" data-plan="${esc(r.key)}" type="button">Re-analyse</button></div></details>`}
+function disc(r){const d=r.discarded||[];if(!d.length)return "";
+  return `<details class="plan"><summary><b>Discarded photos</b><span class="chip warn">${d.length}</span></summary><div class="disc">${d.map(i=>`<figure><img src="${esc(i.src)}" alt="Discarded photo"><figcaption>${esc((i.discarded||{}).reason||"")}</figcaption><button class="btn sm" data-act="restore" data-id="${i.id}" type="button">Restore</button></figure>`).join("")}</div></details>`}
 const MF=[["summary","Product"],["text","Exact text / logo"],["colours","Colours"],["shape","Shape & proportions"],["parts","Parts & counts"],["material","Material & finish"],["size","Real size"],["must_keep","Must never change"],["watch","Watch out (past mistakes)"]];
 function mem(r){const m=r.memory||{},f=m.facts;
   if(!f)return `<div class="acts"><button class="btn sm" data-study="${esc(r.key)}" type="button">Study product (≈ ₹0.3, once)</button></div>`;
@@ -140,14 +163,19 @@ function card(r){const s=ST[r.status]||["mute",r.status], p=r.primary;
   ${r.notes?`<div class="note">${esc(r.notes)}</div>`:""}${r.in_shoot?`<div class="hint">Shots: ${r.shots.length?r.shots.join(", "):"default"}${r.note?" · "+esc(r.note):""}</div>`:""}
   ${r.status=="low_quality"&&p?`<div class="acts"><button class="btn sm" data-act="use_anyway" data-id="${p.id}" type="button">Use anyway</button></div>`:""}
   ${p&&!D.cutouts?kit(r):""}
-  ${p&&!D.cutouts?mem(r):""}
-  ${p&&!D.cutouts?`<div class="acts"><button class="btn sm danger" data-act="skip" data-id="${p.id}" type="button" title="Don't use this photo">✕ Don't use this photo</button></div>`:""}
+  ${p&&!D.cutouts?plan(r):""}
+  ${disc(r)}
+  ${p&&!D.cutouts&&!r.plan?mem(r):""}
+  ${p&&!D.cutouts?`<div class="acts"><button class="btn sm danger" data-act="not_product" data-id="${p.id}" type="button" title="Move this photo to Discarded">✕ Not this product</button></div>`:""}
   ${p&&D.cutouts&&p.cut?`<div class="acts"><button class="btn sm" data-act="ok" data-id="${p.id}" type="button">✓ OK</button><button class="btn sm" data-act="redo" data-id="${p.id}" type="button">↻ Redo</button><button class="btn sm danger" data-act="skip" data-id="${p.id}" type="button">✕ Skip</button></div>`:""}</article>`}
 
 document.addEventListener("click",async e=>{
   const f=e.target.closest("[data-f]"); if(f){filter=f.dataset.f;render();return}
   const a=e.target.closest("[data-act]"); if(a){try{await api(`/api/library/images/${a.dataset.id}`,{method:"POST",body:{action:a.dataset.act}});await load();kick()}catch(x){toast(x.message)}return}
   const kb=e.target.closest("[data-kit]"); if(kb){try{await api(`/api/library/products/${encodeURIComponent(kb.dataset.kit)}/kit`,{method:"POST"});toast("Making the extra views…");poll()}catch(x){toast(x.message)}return}
+  const pl=e.target.closest("[data-plan]"); if(pl){try{await api(`/api/library/products/${encodeURIComponent(pl.dataset.plan)}/plan`,{method:"POST"});toast("Analysing the product with the best model…");poll()}catch(x){toast(x.message)}return}
+  const pa=e.target.closest("[data-papprove]"); if(pa){try{const r=await api(`/api/library/products/${encodeURIComponent(pa.dataset.key)}/plan`,{method:"PUT",body:{approved:pa.dataset.papprove=="1"}});toast(pa.dataset.papprove=="1"?`Plan approved${r.released?` · ${r.released} product(s) back in the queue`:""}`:"Plan un-approved");await load()}catch(x){toast(x.message)}return}
+  const ps=e.target.closest("[data-psave]"); if(ps){const ta=document.querySelector(`[data-pj="${CSS.escape(ps.dataset.psave)}"]`);try{await api(`/api/library/products/${encodeURIComponent(ps.dataset.psave)}/plan`,{method:"PUT",body:{json_text:ta.value}});toast("Plan saved, approve it when ready");await load()}catch(x){toast(x.message)}return}
   const st=e.target.closest("[data-study]"); if(st){try{await api(`/api/library/products/${encodeURIComponent(st.dataset.study)}/study`,{method:"POST"});toast("Studying the product…");poll()}catch(x){toast(x.message)}return}
   const ms=e.target.closest("[data-msave],[data-mapprove]"); if(ms){const box=ms.closest(".memf"),facts={};box.querySelectorAll("[data-mk]").forEach(i=>{facts[i.dataset.mk]=i.dataset.list=="true"?i.value.split("|").map(x=>x.trim()).filter(Boolean):i.value});
     const body={facts}; if(ms.dataset.mapprove!==undefined)body.approved=ms.dataset.mapprove=="1";
@@ -155,7 +183,7 @@ document.addEventListener("click",async e=>{
   const g=e.target.closest("[data-assign]"); if(g){const code=document.querySelector(`[data-code="${g.dataset.assign}"]`).value.trim(); if(!code)return toast("Type a product code");
     try{await api(`/api/library/images/${g.dataset.assign}`,{method:"POST",body:{action:"assign",code}});toast("Assigned to "+code);await load();kick()}catch(x){toast(x.message)}}
 });
-$("#study-all").onclick=async()=>{try{await api("/api/library/study-shoot",{method:"POST"});toast("Studying shoot-sheet products…");poll()}catch(x){toast(x.message)}};
+$("#plan-all").onclick=async()=>{try{await api("/api/library/plan-all",{method:"POST"});toast("Analysing and planning queued products…");poll()}catch(x){toast(x.message)}};
 $("#scan").onclick=async()=>{const link=$("#drive").value.trim(); if(!link)return toast("Paste a Drive folder link");try{await api("/api/library/scan",{method:"POST",body:{link}});toast("Scanning Drive…");poll()}catch(x){toast(x.message)}};
 const drop=$("#drop"), inp=$("#files");
 drop.onclick=()=>inp.click(); drop.onkeydown=e=>{if(e.key=="Enter"||e.key==" "){e.preventDefault();inp.click()}};

@@ -587,13 +587,19 @@ def test_conn(what: str, u=Depends(need("admin"))):
 SETTING_KEYS = ["engine_mode", "library_autoscan", "library_focus", "library_drive_copy", "library_cutouts", "pipeline_mode", "scene_strategy", "scene_reuse", "fresh_brands", "auto_approve", "retries", "publish_shopify", "budget_month", "budget_action", "model_hero_detail",
                 "model_other", "file_naming", "min_raw_px", "output_drive_folder", "cost_mode", "default_shots",
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr",
-                "model_hero", "model_detail", "model_use_case", "model_lifestyle", "escalate_model"]
+                "model_hero", "model_detail", "model_use_case", "model_lifestyle", "escalate_model",
+                "planner_on", "plan_review", "model_planner", "static_rules"]
 
 
 @app.get("/api/admin/settings")
 def get_settings(u=Depends(need("admin"))):
+    from .planner import static_rules
     with SessionLocal() as s:
-        return {k: get_setting(s, k) for k in SETTING_KEYS}
+        out = {k: get_setting(s, k) for k in SETTING_KEYS}
+        out["static_rules"] = static_rules(s)
+        out["planner_on"] = get_setting(s, "planner_on", True)
+        out["plan_review"] = get_setting(s, "plan_review", "flagged")
+        return out
 
 
 @app.put("/api/admin/settings")
@@ -837,6 +843,19 @@ def library_image(iid: int, body: ImgAct, u=Depends(need("editor"))):
             log(s, u.email, f"Product Kit {img.key}: {(img.meta or {}).get('angle')} view {'approved' if body.action == 'kit_approve' else 'rejected'}")
         elif body.action == "use_anyway":
             img.meta = {**(img.meta or {}), "override": True}
+        elif body.action == "restore":              # back from the Discarded section; the AI never discards it again
+            m = {k: v for k, v in (img.meta or {}).items() if k != "discarded"}
+            img.meta = {**m, "keep": True}
+            from .planner import mark_stale
+            mark_stale(s, img.key)
+            log(s, u.email, f"Library: photo {iid} restored for {img.key}")
+        elif body.action == "not_product":          # you: this photo is not this product -> Discarded
+            img.meta = {**(img.meta or {}), "discarded": {"reason": "marked by you", "by": u.email}, "keep": False}
+            img.primary = False
+            from .library import pick_primary
+            from .planner import mark_stale
+            pick_primary(s, img.key)
+            mark_stale(s, img.key)
         elif body.action == "discard":
             img.key, img.cut_status, img.primary = "", "skip", False
             img.dup_of = img.dup_of or -1          # hidden from the tray
@@ -1001,6 +1020,62 @@ def study_one(key: str, u=Depends(need("editor"))):
     return {"ok": True}
 
 
+@app.post("/api/library/products/{key}/plan")
+def plan_product(key: str, u=Depends(need("editor"))):
+    """Analyse this product's photos and plan its 4 shots (best model, one call)."""
+    from .providers import get_provider
+    from . import planner
+
+    def run(s):
+        rec = planner.make_plan(s, key, get_provider())
+        from .db import Usage
+        s.add(Usage(kind="plan", model=rec["model"], cost=config.COST_PLANNER))
+        s.commit()
+        return {"plan": rec["status"], "discarded": len(rec["discarded"])}
+    _bg("Analysing product", run)
+    return {"ok": True}
+
+
+class PlanIn(BaseModel):
+    json_text: str | None = None
+    approved: bool | None = None
+
+
+@app.put("/api/library/products/{key}/plan")
+def edit_plan(key: str, body: PlanIn, u=Depends(need("editor"))):
+    """Edit the plan JSON and/or approve it. Approving releases products waiting for it back into the queue."""
+    import json as _json
+    from .db import LibProduct as _LP
+    from . import planner
+    with SessionLocal() as s:
+        lp = s.scalar(select(_LP).where(_LP.key == key))
+        if not lp or not (lp.data or {}).get("plan"):
+            raise HTTPException(404, "No plan yet for this product")
+        rec = dict(lp.data["plan"])
+        if body.json_text is not None:
+            try:
+                new = _json.loads(body.json_text)
+            except ValueError as e:
+                raise HTTPException(400, f"Not valid JSON: {e}")
+            if not isinstance(new, dict) or not isinstance(new.get("shots"), dict):
+                raise HTTPException(400, "The plan must be a JSON object with a 'shots' section")
+            rec.update(json=new, edited=True, edited_by=u.email, approved=False)
+            lp.data = {**lp.data, "memory": {**((lp.data or {}).get("memory") or {}),
+                                             "facts": planner.memory_facts(new, lp.data)}}
+        if body.approved is not None:
+            rec.update(approved=body.approved, approved_by=u.email if body.approved else "")
+        lp.data = {**lp.data, "plan": rec}
+        released = 0
+        if rec.get("approved"):
+            for p in s.scalars(select(Product).where(Product.stage == "plan")):
+                if (p.data or {}).get("lib_key") == key:
+                    p.stage, p.error = "queue", ""
+                    released += 1
+        log(s, u.email, f"Shot plan {'approved' if rec.get('approved') else 'edited'}: {lp.product_id or key}")
+        s.commit()
+        return {"ok": True, "released": released, "plan": rec}
+
+
 @app.post("/api/library/study-shoot")
 def study_shoot(u=Depends(need("editor"))):
     """Study every shoot-sheet product that has photos but no memory yet (≈ ₹0.3 each, once)."""
@@ -1023,6 +1098,38 @@ def study_shoot(u=Depends(need("editor"))):
                 continue
         return f"{done} products studied"
     _bg("Studying shoot-sheet products", run)
+    return {"ok": True}
+
+
+@app.post("/api/library/plan-all")
+def plan_all(u=Depends(need("editor"))):
+    """Analyse every shoot-sheet / brand-queue product that has photos and no plan yet (or whose photos changed)."""
+    from .providers import get_provider
+    from .db import LibProduct as _LP
+    from . import planner
+    from .brands import queued_keys
+
+    def run(s):
+        prov, done, failed = get_provider(), 0, 0
+        keys = [it.get("key") for it in (get_setting(s, "shoot_list", []) or []) if it.get("key")]
+        keys += sorted(queued_keys(s))
+        for k in dict.fromkeys(keys):
+            lp = s.scalar(select(_LP).where(_LP.key == k))
+            rec = (lp.data or {}).get("plan") if lp else None
+            if not lp or (rec and not rec.get("stale") and rec.get("status") == "ok"):
+                continue
+            try:
+                r = planner.make_plan(s, k, prov)
+                s.add(Usage(product_id=None, kind="plan", model=r["model"], cost=config.COST_PLANNER))
+                s.commit()
+                done += 1
+            except ValueError:
+                continue
+            except Exception as e:
+                failed += 1
+                print(f"[planner] {k}: {e}")
+        return f"{done} products analysed" + (f", {failed} failed" if failed else "")
+    _bg("Analysing products", run)
     return {"ok": True}
 
 
