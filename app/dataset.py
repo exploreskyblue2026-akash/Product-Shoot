@@ -124,6 +124,19 @@ def seed(s: Session, owner_email: str, owner_hash: str):
     if not get_setting(s, "preset_engine_v3", False) and os.environ.get("SKIP_PRESETS") != "1":
         set_setting(s, "engine_mode", "hybrid")          # Nov 2: real product pixels for the hero when possible
         set_setting(s, "preset_engine_v3", True)
+    if not get_setting(s, "preset_gemini_only_v1", False) and os.environ.get("SKIP_PRESETS") != "1":
+        set_setting(s, "use_openrouter", False)            # decided: Gemini only
+        for k in ("model_hero", "model_detail", "model_use_case", "model_lifestyle", "escalate_model"):
+            if str(get_setting(s, k, "") or "").startswith("openrouter:"):
+                set_setting(s, k, "")
+        set_setting(s, "preset_gemini_only_v1", True)
+    if not get_setting(s, "reset_troika_v1", False) and os.environ.get("SKIP_PRESETS") != "1":
+        try:                                               # decided: start Troika clean (master rows kept)
+            from .library import reset_brand
+            reset_brand(s, "troika")
+        except Exception as e:
+            print(f"[seed] Troika reset skipped: {e}")
+        set_setting(s, "reset_troika_v1", True)
     if not get_setting(s, "recheck_matches_v1", False) and os.environ.get("SKIP_PRESETS") != "1":
         from .library import recheck_matches
         try:

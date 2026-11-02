@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.0.0 (library stages + matching ladder, official website photos, brand reset, hybrid real-pixel hero, keep-awake)"
+APP_VERSION = "4.1.0 (Gemini only by default, connection on/off switches, Troika photos removed)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

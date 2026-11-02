@@ -786,7 +786,7 @@ def test_per_shot_model_and_upgrade_on_qc_fail():
     c = client()
     c.put("/api/admin/settings", json={"default_shots": [1], "max_cost_product": 5, "daily_budget": 100, "retries": 0,
                                        "qc_mode": "light", "model_hero": "openrouter:black-forest-labs/flux.2-pro:free",
-                                       "escalate_model": "gemini-3-pro-image"})
+                                       "escalate_model": "gemini-3-pro-image", "use_openrouter": True})
     c.post("/api/autopilot", json={"autopilot": False})
     c.post("/api/sources/upload", files=[("files", ("ESC-1_front.jpg", (SAMPLES / "WAT-HEM-SSGT_front.png").read_bytes(), "image/jpeg"))])
     pid = {x["code"]: x["id"] for x in c.get("/api/state").json()["queue"]}["ESC-1"]
@@ -814,7 +814,7 @@ def test_model_error_falls_back_to_upgrade_model():
     c = client()
     c.put("/api/admin/settings", json={"default_shots": [1], "max_cost_product": 5, "daily_budget": 100, "retries": 0,
                                        "qc_mode": "light", "model_hero": "openrouter:black-forest-labs/flux.2-pro:free",
-                                       "escalate_model": "gemini-3-pro-image"})
+                                       "escalate_model": "gemini-3-pro-image", "use_openrouter": True})
     c.post("/api/autopilot", json={"autopilot": False})
     c.post("/api/sources/upload", files=[("files", ("ERR-1_front.jpg", (SAMPLES / "WAT-HEM-SSGT_front.png").read_bytes(), "image/jpeg"))])
     pid = {x["code"]: x["id"] for x in c.get("/api/state").json()["queue"]}["ERR-1"]
@@ -1035,3 +1035,29 @@ def test_hybrid_hero_keeps_real_pixels_for_clean_packshot():
         p = next(x for x in s.query(Product).all() if (x.data or {}).get("lib_key") == "KR1805BR")
         hero = next(sh for sh in p.shots if sh.no == 1)
         assert hero.image_path and (hero.qc or {}).get("how", {}).get("method") == "edit" and hero.qc["how"]["exact"]
+
+
+
+def test_openrouter_switched_off_means_gemini_only():
+    from app.providers import mock
+    c = client()
+    c.put("/api/admin/settings", json={"default_shots": [1], "max_cost_product": 5, "daily_budget": 100, "retries": 0,
+                                       "qc_mode": "light", "model_hero": "openrouter:black-forest-labs/flux.2-pro",
+                                       "escalate_model": "", "use_openrouter": False, "cost_mode": "max"})
+    c.post("/api/autopilot", json={"autopilot": False})
+    c.post("/api/sources/upload", files=[("files", ("OFF-1_front.jpg", (SAMPLES / "WAT-HEM-SSGT_front.png").read_bytes(), "image/jpeg"))])
+    pid = {x["code"]: x["id"] for x in c.get("/api/state").json()["queue"]}["OFF-1"]
+    used = []
+    og = mock.MockProvider.generate
+    def spy(self, prompt, raw, model, size="1K", refs=None, style=None):
+        used.append(model); return og(self, prompt, raw, model, size, refs, style)
+    mock.MockProvider.generate = spy
+    try:
+        c.post(f"/api/products/{pid}/run"); pipeline.tick()
+        assert used and not any(m.startswith("openrouter:") for m in used) and "pro" in used[0]
+        c.put("/api/admin/settings", json={"use_shopify": False})
+        assert c.post("/api/shopify/push", json={"ids": [pid]}).status_code == 400
+        assert c.get("/api/admin/settings").json()["use_openrouter"] is False
+    finally:
+        mock.MockProvider.generate = og
+        c.put("/api/admin/settings", json={"model_hero": "", "use_shopify": True})

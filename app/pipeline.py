@@ -47,6 +47,8 @@ def _model_for(s: Session, kind: str) -> tuple[str, str]:
     mode = get_setting(s, "cost_mode", "economy")
     hero_m, other_m, size = config.COST_MODES.get(mode, config.COST_MODES["economy"])
     own = (get_setting(s, f"model_{kind}", "") or "").strip()      # Admin: a model chosen for this one shot
+    if own.startswith("openrouter:") and not get_setting(s, "use_openrouter", False):
+        own = ""                                                   # OpenRouter is switched off: Gemini only
     if own:
         return (own if own.startswith("openrouter:") else config.model_name(own)), size
     pick = hero_m if kind in ("hero", "detail") else other_m
@@ -424,6 +426,8 @@ def process(pid: int, only: list[int] | None = None):
             sent = {"photos": sent_rels, "hero": bool(hero_ref), "override": bool(override), "plan": plan is not None}
             result = None
             escalate = (get_setting(s, "escalate_model", "") or "").strip()
+            if escalate.startswith("openrouter:") and not get_setting(s, "use_openrouter", False):
+                escalate = ""
             escalated = False
             for attempt in range(retries + 1 + (1 if escalate and escalate != model else 0)):
                 if STOP.is_set():
@@ -560,7 +564,7 @@ def approve(s: Session, p: Product, who: str):
         except Exception as e:
             errors.append(f"Drive upload failed: {e}")
     p.data = {**(p.data or {}), "shopify": {**((p.data or {}).get("shopify") or {}), "status": "ready"}}
-    if get_setting(s, "publish_shopify", False):          # optional: push straight away instead of via the Shopify queue
+    if get_setting(s, "publish_shopify", False) and get_setting(s, "use_shopify", True):   # optional: push straight away instead of via the Shopify queue
         try:
             from . import shopq
             shopq.push_one(s, p)

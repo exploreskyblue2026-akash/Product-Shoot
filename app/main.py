@@ -18,6 +18,13 @@ from . import ingest, pipeline, secrets
 from contextlib import asynccontextmanager
 
 
+def _switch(name: str, label: str, default: bool = True):
+    """Admin -> API & models -> Connections: a switched-off connection is never called."""
+    with SessionLocal() as s:
+        if not get_setting(s, name, default):
+            raise HTTPException(400, f"{label} is switched off in Admin → API & models → Connections.")
+
+
 def _keep_awake():
     """Render's free plan sleeps after 15 idle minutes, which also stops background jobs. Ping our own public URL every
     10 minutes (Render sets RENDER_EXTERNAL_URL). Turn off with KEEP_AWAKE=false."""
@@ -659,7 +666,8 @@ SETTING_KEYS = ["engine_mode", "library_autoscan", "library_focus", "library_dri
                 "model_other", "file_naming", "min_raw_px", "output_drive_folder", "cost_mode", "default_shots",
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr",
                 "model_hero", "model_detail", "model_use_case", "model_lifestyle", "escalate_model",
-                "planner_on", "plan_review", "model_planner", "static_rules", "hero_review"]
+                "planner_on", "plan_review", "model_planner", "static_rules", "hero_review",
+                "use_openrouter", "use_shopify", "use_drive", "use_websites"]
 
 
 @app.get("/api/admin/settings")
@@ -670,6 +678,8 @@ def get_settings(u=Depends(need("admin"))):
         out["static_rules"] = static_rules(s)
         out["planner_on"] = get_setting(s, "planner_on", True)
         out["plan_review"] = get_setting(s, "plan_review", "flagged")
+        for k, d in (("use_openrouter", False), ("use_shopify", True), ("use_drive", True), ("use_websites", True)):
+            out[k] = get_setting(s, k, d)
         return out
 
 
@@ -857,6 +867,7 @@ class LinkIn(BaseModel):
 
 @app.post("/api/library/scan")
 def library_scan(body: LinkIn, u=Depends(need("editor"))):
+    _switch("use_drive", "Google Drive")
     _bg("Drive scan", lambda s: library.scan_drive(s, body.link, reread=True))
     return {"ok": True}
 
@@ -1212,12 +1223,14 @@ def rematch(u=Depends(need("editor"))):
 
 @app.post("/api/library/products/{key}/web")
 def web_one(key: str, u=Depends(need("editor"))):
+    _switch("use_websites", "Brand websites")
     _bg(f"Fetching {key} from the brand website", lambda s: library.web_fetch(s, key))
     return {"ok": True}
 
 
 @app.post("/api/library/web-queue")
 def web_queue(u=Depends(need("editor"))):
+    _switch("use_websites", "Brand websites")
     """Fetch official photos for every shoot-sheet / brand-queue product (brands with a website)."""
     from .brands import queued_keys
 
@@ -1240,6 +1253,7 @@ def web_queue(u=Depends(need("editor"))):
 
 @app.post("/api/brands/{key}/web-index")
 def brand_web_index(key: str, u=Depends(need("editor"))):
+    _switch("use_websites", "Brand websites")
     """Read the brand's sitemap and product pages once (resumable), so products can be found by EAN / reference."""
     import time as _t
 
@@ -1341,6 +1355,7 @@ def shopify_template(body: TemplateIn, u=Depends(need("editor"))):
 
 @app.get("/api/shopify/preview/{pid}")
 def shopify_preview(pid: int, overwrite: bool = False, u=Depends(need("editor"))):
+    _switch("use_shopify", "Shopify")
     from . import shopq
     with SessionLocal() as s:
         p = s.get(Product, pid)
@@ -1360,6 +1375,7 @@ class PushIn(BaseModel):
 
 @app.post("/api/shopify/push")
 def shopify_push(body: PushIn, u=Depends(need("editor"))):
+    _switch("use_shopify", "Shopify")
     from . import shopq
     if _shop_job["running"]:
         raise HTTPException(409, "A push is already running")
@@ -1507,7 +1523,7 @@ def _autoscan_loop():
         try:
             with SessionLocal() as s:
                 link = get_setting(s, "library_drive_link", "")
-                on = get_setting(s, "library_autoscan", True)
+                on = get_setting(s, "library_autoscan", True) and get_setting(s, "use_drive", True)
                 last = get_setting(s, "library_last_scan", "") or ""
             if not (link and on) or _lib_job["running"]:
                 continue

@@ -125,6 +125,17 @@ pre.prompt{margin:0;font-family:var(--f-mono);font-size:12px;line-height:1.55;wh
           </form>
         </section>
         <section class="panel">
+          <div class="panel-h"><h2>Connections · on / off</h2><span class="hint">A switched-off connection is never called</span></div>
+          <div class="form2">
+            <div class="field"><label>Google Gemini (analysis, images, QC)</label><input value="Always on: the main AI" disabled></div>
+            <div class="field"><label for="s-use_openrouter">OpenRouter (FLUX etc.)</label><select id="s-use_openrouter" data-setting="use_openrouter" data-type="bool"><option value="false">Off (Gemini only)</option><option value="true">On (only for model boxes starting with openrouter:)</option></select></div>
+            <div class="field"><label for="s-use_shopify">Shopify</label><select id="s-use_shopify" data-setting="use_shopify" data-type="bool"><option value="true">On</option><option value="false">Off</option></select></div>
+            <div class="field"><label for="s-use_drive">Google Drive scanning</label><select id="s-use_drive" data-setting="use_drive" data-type="bool"><option value="true">On</option><option value="false">Off</option></select></div>
+            <div class="field"><label for="s-use_websites">Brand websites (official photos)</label><select id="s-use_websites" data-setting="use_websites" data-type="bool"><option value="true">On</option><option value="false">Off</option></select></div>
+          </div>
+          <div class="toolbar" style="margin-top:12px"><button class="btn primary" type="button" data-save-settings>Save connections</button></div>
+        </section>
+        <section class="panel">
           <div class="panel-h"><h2>Connection tests</h2></div>
           <div class="toolbar"><button class="btn" type="button" data-test="gemini">Test Gemini</button><button class="btn" type="button" data-test="openrouter">Test OpenRouter</button><button class="btn" type="button" data-test="google">Test Google Drive</button><button class="btn" type="button" data-test="shopify">Test Shopify</button></div>
           <p class="hint" id="test-out" style="margin:12px 0 0;white-space:pre-wrap"></p>
