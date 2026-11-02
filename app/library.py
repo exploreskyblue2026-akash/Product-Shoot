@@ -292,8 +292,26 @@ def key_from_name(name: str, idx: dict[str, LibProduct]) -> LibProduct | None:
     return None
 
 
+def match_name(name: str, idx: dict) -> tuple[LibProduct | None, str, list[str]]:
+    """The matching ladder for a file name. Returns (product, how, suggestions).
+    1 exact code / EAN as a whole word  2 brand article base number + colour suffix (only if exactly one fits)."""
+    p = key_from_name(name, idx)
+    if p:
+        return p, "code in file name", []
+    stem = re.sub(r"\.[a-z0-9]{3,4}$", "", name.split("/")[-1], flags=re.I)
+    toks = [x for x in re.split(r"[^A-Za-z0-9]+", stem) if len(x) >= 6 and any(ch.isdigit() for ch in x)]
+    for tok in toks:
+        base = norm(tok)
+        fits = sorted({k for k in idx if k.startswith(base) and k != base and k[len(base):].isalpha() and len(k) - len(base) <= 5})
+        if len(fits) == 1:
+            return idx[fits[0]], f"article number {tok} + colour {fits[0][len(base):]}", []
+        if fits:
+            return None, "", [idx[k].product_id or k for k in fits][:8]
+    return None, "", []
+
+
 def add_image(s: Session, data: bytes, name: str, source: str = "file", key: str | None = None,
-              drive_id: str = "", idx=None) -> LibImage | None:
+              drive_id: str = "", idx=None, how: str = "") -> LibImage | None:
     try:
         im = Image.open(io.BytesIO(data))
         im.load()
@@ -302,11 +320,15 @@ def add_image(s: Session, data: bytes, name: str, source: str = "file", key: str
     if min(im.size) < 120:                               # icons, logos, bullets in catalogues
         return None
     idx = idx if idx is not None else _index(s)
+    sugg = []
     if key is None:
-        p = key_from_name(name, idx)
+        p, how, sugg = match_name(name, idx)
         key = p.key if p else ""
+    elif key and not how:
+        how = {"catalogue": "catalogue page caption", "website": "official website", "kit": "AI view (approved by you)"}.get(source, "assigned")
     h = dhash(im)
     q = photo_quality(im, s)
+    q = {**q, "match": how if key else "", **({"suggest": sugg} if sugg else {})}
     rel = storage.save(f"library/raw/{storage.safe(key or 'unmatched')}/{storage.safe(name)[-120:]}",
                        storage.normalise_raw(data))
     img = LibImage(key=key, source=source, src_name=name[:300], drive_id=drive_id, path=rel,
@@ -514,11 +536,11 @@ def scan_drive(s: Session, link: str, reread: bool = False) -> dict:
                 continue
             s.add(LibImage(key="", source="marker", drive_id=f["id"], cut_status="skip", src_name=f["name"]))
         elif f["mimeType"].startswith("image/") or low.endswith(IMG_EXT):
-            p = key_from_name(f["path"], idx)
+            p = match_name(f["path"], idx)[0]
             if focused and not p:                      # not a shoot-sheet product: don't even download it
                 stats["skipped_not_in_sheet"] += 1
                 continue
-            if add_image(s, google.download(f["id"]), f["path"], "drive", key=p.key if p else "", drive_id=f["id"], idx=idx):
+            if add_image(s, google.download(f["id"]), f["path"], "drive", key=None, drive_id=f["id"], idx=idx):
                 stats["images"] += 1
         s.commit()
     set_setting(s, "library_drive_link", link)
@@ -795,7 +817,9 @@ def _img(i: LibImage) -> dict:
             "w": i.w, "h": i.h, "status": i.cut_status, "note": i.cut_note, "name": i.src_name,
             "source": i.source, "primary": i.primary, "angle": (i.meta or {}).get("angle", ""),
             "flags": (i.meta or {}).get("flags", []), "sharpness": (i.meta or {}).get("sharpness"),
-            "kit": (i.meta or {}).get("kit", ""), "discarded": (i.meta or {}).get("discarded")}
+            "kit": (i.meta or {}).get("kit", ""), "discarded": (i.meta or {}).get("discarded"),
+            "match": (i.meta or {}).get("match", ""), "suggest": (i.meta or {}).get("suggest", []),
+            "web": (i.meta or {}).get("web_url", "")}
 
 
 def report_csv(s: Session) -> str:
@@ -823,7 +847,7 @@ def assign(s: Session, image_id: int, code: str) -> str:
     if not img or not p:
         raise ValueError("Code not found in the master sheet")
     img.key = p.key
-    img.meta = {**(img.meta or {}), "by_hand": True}
+    img.meta = {**(img.meta or {}), "by_hand": True, "match": "assigned by you"}
     pick_primary(s, p.key)
     if not cutouts_on(s):
         try:
@@ -870,3 +894,121 @@ def recheck_matches(s: Session) -> dict:
     log(s, "library", f"Exact-code re-check: {moved} photos re-filed, {len(touched)} products will be re-studied")
     s.commit()
     return {"moved": moved, "products": len(touched)}
+
+
+def rematch_unmatched(s: Session) -> dict:
+    """Run the matching ladder again over every unmatched photo (after a new sheet or a smarter ladder)."""
+    idx = _index(s)
+    matched = suggested = 0
+    for img in s.scalars(select(LibImage).where(LibImage.key == "", LibImage.source.in_(("drive", "file")),
+                                                LibImage.dup_of.is_(None))):
+        p, how, sugg = match_name(img.src_name or img.path, idx)
+        if p:
+            img.key, img.meta = p.key, {**(img.meta or {}), "match": how}
+            pick_primary(s, p.key)
+            matched += 1
+        elif sugg:
+            img.meta = {**(img.meta or {}), "suggest": sugg}
+            suggested += 1
+    log(s, "library", f"Re-match: {matched} unmatched photos filed, {suggested} with suggestions")
+    s.commit()
+    return {"matched": matched, "suggested": suggested}
+
+
+# ------------------------------------------------------------------ official brand websites
+def _brand_of(s: Session, lp: LibProduct) -> tuple[str, dict]:
+    from .brands import brand_key_for, brand_rows
+    rows = brand_rows(s)
+    k = brand_key_for(lp, rows)
+    return k, ((rows[k].data or {}) if k in rows else {})
+
+
+def web_index(s: Session, brand_key: str, budget: int = 250, stop=None) -> dict:
+    from .brands import brand_rows
+    from .connectors import website
+    row = brand_rows(s).get(brand_key)
+    site = ((row.data or {}).get("website") or "").strip() if row else ""
+    if not site:
+        raise ValueError("Add the brand's website on its Brands page first")
+    if not site.startswith("http"):
+        site = "https://" + site
+    idx = website.crawl(site, get_setting(s, f"webindex:{brand_key}", {}) or {}, (row.data or {}).get("web_locale", ""),
+                        budget=budget, stop=stop)
+    set_setting(s, f"webindex:{brand_key}", idx)
+    s.commit()
+    return {"pages": len(idx.get("urls") or []), "indexed": idx.get("done", 0),
+            "products_found": sum(1 for f in (idx.get("pages") or {}).values() if f.get("r") or f.get("e"))}
+
+
+def web_fetch(s: Session, key: str) -> dict:
+    """Find this exact product on its brand's official site, verify it, and add its photos to the cluster."""
+    from .connectors import website
+    lp = s.scalar(select(LibProduct).where(LibProduct.key == key))
+    if lp is None:
+        raise ValueError("Unknown product")
+    bkey, b = _brand_of(s, lp)
+    codes = [c for c in [lp.product_id, lp.item_code] + list(((lp.data or {}).get("skus") or [])) if c]
+    idx = get_setting(s, f"webindex:{bkey}", {}) or {}
+    url = website.lookup(idx, lp.ean, [lp.product_id])
+    facts = None
+    if not url and b.get("web_search"):
+        for cand in website.search_candidates(b["web_search"], lp.product_id or lp.ean)[:8]:
+            try:
+                facts = website.fetch_product(cand, lp.ean, [lp.product_id])
+                break
+            except Exception:
+                continue
+    if not url and not facts:
+        n = idx.get("done", 0)
+        raise ValueError(f"Not found on {b.get('website') or 'the brand website'} (index has {n} pages; build or finish "
+                         "the website index on the Brands page)" if b.get("website") else "No website set for this brand")
+    facts = facts or website.fetch_product(url, lp.ean, [lp.product_id])
+    have = {(i.meta or {}).get("web_url") for i in s.scalars(select(LibImage).where(LibImage.key == key))}
+    added = 0
+    for u in facts["images"]:
+        if u in have:
+            continue
+        try:
+            data = website.download(u)
+        except Exception:
+            continue
+        name = f"web/{bkey}/{u.split('/')[-1].split('?')[0]}"
+        img = add_image(s, data, name, "website", key=key, how=f"official website ({facts['verified_by']} on page)")
+        if img is not None:
+            img.meta = {**(img.meta or {}), "web_url": u}
+            added += 1
+    lp.data = {**(lp.data or {}), "web": {k: facts[k] for k in ("url", "title", "description", "dimensions", "verified_by")}}
+    log(s, "library", f"{lp.product_id or key}: {added} photo(s) from {facts['url']} (verified by {facts['verified_by']})")
+    s.commit()
+    return {"url": facts["url"], "added": added, "verified_by": facts["verified_by"]}
+
+
+def reset_brand(s: Session, brand_key: str) -> dict:
+    """Remove a brand's photos, catalogue pictures, analyses and unfinished queue items. Master-sheet rows stay.
+    Drive files are remembered as 'removed' so the next Drive scan does not bring them back."""
+    from .brands import brand_rows, products_of
+    from .db import Product
+    rows = brand_rows(s)
+    if brand_key not in rows:
+        raise ValueError("Unknown brand")
+    keys = {p.key for p in products_of(s, brand_key)}
+    label = re.sub(r"[^a-z0-9]", "", str((rows[brand_key].data or {}).get("brand_name") or brand_key).lower())
+    removed = 0
+    for img in list(s.scalars(select(LibImage).where(LibImage.source != "marker"))):
+        mine = img.key in keys or (not img.key and label and label in re.sub(r"[^a-z0-9]", "", (img.src_name or "").lower()))
+        if not mine:
+            continue
+        if img.drive_id:
+            s.add(LibImage(key="", source="marker", drive_id=img.drive_id, cut_status="skip", src_name=img.src_name))
+        s.delete(img)
+        removed += 1
+    for lp in s.scalars(select(LibProduct).where(LibProduct.key.in_(keys))) if keys else []:
+        lp.data = {k: v for k, v in (lp.data or {}).items() if k not in ("plan", "memory", "web", "ai_description")}
+    dropped = 0
+    for p in list(s.scalars(select(Product))):
+        if (p.data or {}).get("lib_key") in keys and p.stage not in ("saved", "gen"):
+            s.delete(p)
+            dropped += 1
+    log(s, "library", f"Brand reset {brand_key}: {removed} photos, {dropped} queue items removed; master rows kept")
+    s.commit()
+    return {"photos": removed, "queue_items": dropped, "products_kept": len(keys)}

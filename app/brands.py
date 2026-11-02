@@ -112,9 +112,13 @@ def detail(s: Session, key: str, search: str = "", limit: int = 200) -> dict:
         avail.sort(key=lambda x: (x["status"] != "ready", x["status"] != "low_quality", x["photos"] == 0))   # with photos first
         avail = avail[:limit]
     golden = [f"/files/{x}" for x in d.get("golden") or []]
+    from .db import get_setting
+    wi = get_setting(s, f"webindex:{key}", {}) or {}
+    web = {"pages": len(wi.get("urls") or []), "indexed": wi.get("done", 0), "at": wi.get("at", ""),
+           "found": sum(1 for f in (wi.get("pages") or {}).values() if f.get("r") or f.get("e"))}
     return {"key": key, "profile": {k: v for k, v in d.items() if k not in ("queue", "golden")}, "golden": golden,
             "logo": f"/files/{d['logo']}" if d.get("logo") else "", "queue": q_items, "available": avail,
-            "in_master": len(products_of(s, key)) if key != "_default" else 0}
+            "in_master": len(products_of(s, key)) if key != "_default" else 0, "web": web}
 
 
 def set_queue(s: Session, key: str, keys: list[str]):

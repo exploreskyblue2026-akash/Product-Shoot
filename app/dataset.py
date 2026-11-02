@@ -121,6 +121,9 @@ def seed(s: Session, owner_email: str, owner_hash: str):
         for k, v in {"cost_mode": "max", "engine_mode": "classic"}.items():
             set_setting(s, k, v)
         set_setting(s, "rules_v3", True)
+    if not get_setting(s, "preset_engine_v3", False) and os.environ.get("SKIP_PRESETS") != "1":
+        set_setting(s, "engine_mode", "hybrid")          # Nov 2: real product pixels for the hero when possible
+        set_setting(s, "preset_engine_v3", True)
     if not get_setting(s, "recheck_matches_v1", False) and os.environ.get("SKIP_PRESETS") != "1":
         from .library import recheck_matches
         try:

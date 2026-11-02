@@ -73,13 +73,20 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
 </header>
 <main>
   <section class="panel" aria-labelledby="h-add">
-    <div class="panel-h"><h2 id="h-add">1 · Add to the library</h2><span class="chip mute" id="job">Idle</span></div>
-    <p class="hint" style="margin-top:0">Drop anything: master sheet, shoot sheet (SHOOT · SHOTS · PRIORITY · NOTE), photos, ZIPs, catalogue PDFs. Photos are matched to products by the code in the file or folder name, duplicates dropped, and the originals kept grouped by code (also in Drive → Product library, if that folder exists).</p>
+    <div class="panel-h"><h2 id="h-add">1 · Sources</h2><span class="chip mute" id="job">Idle</span></div>
+    <p class="hint" style="margin-top:0">Drop anything: master sheet, shoot sheet (SHOOT · SHOTS · PRIORITY · NOTE), photos, ZIPs, catalogue PDFs, or scan Drive. Official product photos can also be fetched from each brand's website (set it up on the brand's page).</p>
     <div class="row">
       <label class="field">Google Drive folder or Shared drive link<input id="drive" placeholder="https://drive.google.com/drive/folders/…"></label>
       <button class="btn primary" id="scan" type="button">Scan Drive</button>
     </div>
+    <div class="acts" style="margin-top:10px"><button class="btn sm" id="web-all" type="button" title="For every shoot-sheet / brand-queue product: find its page on the brand's official site by EAN or reference, verify it, add its photos">Fetch official photos for queued products</button></div>
     <div class="drop" id="drop" tabindex="0" role="button" style="margin-top:12px">Drop files here or click to choose<input type="file" id="files" multiple hidden accept=".jpg,.jpeg,.png,.webp,.zip,.pdf,.xlsx,.xlsm"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-clu">
+    <div class="panel-h"><h2 id="h-clu">2 · Clustering: how photos were filed</h2><div class="acts"><button class="btn sm" id="rematch" type="button" title="Run the matching ladder again over all unmatched photos">Re-match unmatched photos</button></div></div>
+    <p class="hint" style="margin-top:0">A photo is filed under a product only when its code is certain: <b>1</b> the exact code or EAN as a whole word in the file / folder name, <b>2</b> a brand article number whose colour suffix fits exactly one product, <b>3</b> the brand's official product page (EAN or reference verified on the page), <b>4</b> you. Everything else waits in Unmatched with suggestions; nothing is guessed.</p>
+    <div class="stats" id="clu"></div>
   </section>
 
   <section class="panel" aria-labelledby="h-cut" id="cut-panel">
@@ -93,14 +100,14 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
   </section>
 
   <section class="panel" aria-labelledby="h-prod">
-    <div class="panel-h"><h2 id="h-prod">3 · Products</h2><div class="acts"><button class="btn sm primary" id="plan-all" type="button" title="Best model checks every photo, understands the product and plans its 4 shots (≈ ₹2-3 per product, once)">Analyse &amp; plan all queued products</button><a class="btn sm" href="/api/library/report.csv" download>Download report (CSV)</a></div></div>
+    <div class="panel-h"><h2 id="h-prod">3 · Products &amp; cluster review</h2><div class="acts"><button class="btn sm primary" id="plan-all" type="button" title="Best model checks every photo, understands the product and plans its 4 shots (≈ ₹2-3 per product, once)">Analyse &amp; plan all queued products</button><a class="btn sm" href="/api/library/report.csv" download>Download report (CSV)</a></div></div>
     <div class="stats" id="stats"></div>
     <div class="grid" id="grid" style="margin-top:12px"></div>
   </section>
 
   <section class="panel" aria-labelledby="h-un">
-    <div class="panel-h"><h2 id="h-un">4 · Unmatched tray</h2><span class="hint" id="un-n"></span></div>
-    <p class="hint" style="margin-top:0">Pictures with no product code. Type the code and press Assign, or Discard banners and lifestyle shots.</p>
+    <div class="panel-h"><h2 id="h-un">4 · Unmatched photos</h2><span class="hint" id="un-n"></span></div>
+    <p class="hint" style="margin-top:0">Photos whose code could not be found in the master sheet (for example files named with a brand article number that is not in your sheet). Click a suggestion or type the code, then Assign; Discard banners and lifestyle shots.</p>
     <div class="un" id="un"></div>
   </section>
 </main>
@@ -123,8 +130,11 @@ function render(){
   const list=rows.filter(r=>filter=="all"?r.images:filter=="shoot"?r.in_shoot:filter=="needs_photo"?["needs_photo","not_in_master"].includes(r.status):filter=="discarded"?(r.discarded||[]).length:filter=="review"?(r.plan&&r.plan.json&&r.plan.json.review_needed&&!r.plan.approved):r.status==filter).slice(0,300);
   $("#grid").innerHTML=list.map(card).join("")||'<div class="empty">Nothing here yet.</div>';
   $("#un-n").textContent=D.unmatched.length+" pictures";
+  {const by={};rows.forEach(r=>(r.all||[]).forEach(i=>{const m=(i.match||"code in file name").replace(/article number .*/,"article number + colour").replace(/official website.*/,"official website");by[m]=(by[m]||0)+1}));
+   const disc=rows.reduce((n,r)=>n+(r.discarded||[]).length,0),sug=D.unmatched.filter(u=>u.suggest&&u.suggest.length).length;
+   $("#clu").innerHTML=Object.entries(by).map(([k,n])=>`<button type="button" disabled><b>${n}</b>${esc(k)}</button>`).join("")+`<button type="button" disabled><b>${D.unmatched.length}</b>unmatched</button><button type="button" disabled><b>${sug}</b>unmatched with suggestions</button><button type="button" data-f="discarded"><b>${disc}</b>discarded (view)</button>`}
   $("#un").innerHTML=D.unmatched.slice(0,120).map(u=>`<div class="card"><div class="pic"><img src="${esc(u.src)}" alt="" loading="lazy"></div><div class="nm" title="${esc(u.name)}">${esc(u.name)}</div>
-    <input aria-label="Product code" placeholder="Product code" value="${esc((u.name.match(/codes on page: ([^,)]+)/)||[])[1]||"")}" data-code="${u.id}"><div class="acts"><button class="btn sm primary" data-assign="${u.id}" type="button">Assign</button><button class="btn sm" data-act="discard" data-id="${u.id}" type="button">Discard</button></div></div>`).join("")||'<div class="empty">Nothing unmatched.</div>';
+    ${u.suggest&&u.suggest.length?`<div class="hint">Could be: ${u.suggest.map(c=>`<button type="button" class="btn sm" data-sug="${esc(c)}" data-for="${u.id}">${esc(c)}</button>`).join(" ")}</div>`:""}<div class="hint">${u.w}×${u.h}${Math.max(u.w,u.h)<800?" · too small to use as a reference":""}</div><input aria-label="Product code" placeholder="Product code" value="${esc((u.name.match(/codes on page: ([^,)]+)/)||[])[1]||(u.suggest&&u.suggest.length==1?u.suggest[0]:""))}" data-code="${u.id}"><div class="acts"><button class="btn sm primary" data-assign="${u.id}" type="button">Assign</button><button class="btn sm" data-act="discard" data-id="${u.id}" type="button">Discard</button></div></div>`).join("")||'<div class="empty">Nothing unmatched.</div>';
 }
 function kit(r){const k=r.kit||{missing:[],pending:[],real_angles:[]};const pend=(r.all||[]).filter(i=>i.kit=="pending");
   const appr=(r.all||[]).filter(i=>i.kit=="approved");
@@ -148,7 +158,7 @@ function plan(r){const rec=r.plan;
     <details><summary class="hint">Edit plan (JSON)</summary><textarea data-pj="${esc(r.key)}" spellcheck="false">${esc(JSON.stringify(j,null,1))}</textarea><div class="acts"><button class="btn sm" data-psave="${esc(r.key)}" type="button">Save edits</button></div></details>
     <div class="acts">${rec.approved?`<button class="btn sm" data-papprove="0" data-key="${esc(r.key)}" type="button">Un-approve</button>`:`<button class="btn sm primary" data-papprove="1" data-key="${esc(r.key)}" type="button">✓ Approve plan</button>`}<button class="btn sm" data-plan="${esc(r.key)}" type="button">Re-analyse</button></div></details>`}
 function photos(r){const a=r.all||[];if(!a.length)return "";
-  return `<details class="plan"><summary><b>Photos in this cluster</b><span class="chip mute">${a.length}</span></summary><div class="disc">${a.map(i=>`<figure><a href="${esc(i.src)}" target="_blank" rel="noopener"><img src="${esc(i.src)}" alt="" style="opacity:1"></a><figcaption>${i.primary?"<b>main</b> · ":""}${esc(i.angle||"no angle")}<br>${i.w}×${i.h} · ${esc(i.source)}${i.sharpness!=null?`<br>sharpness ${esc(i.sharpness)}`:""}${i.flags&&i.flags.length?`<br>⚠ ${esc(i.flags.join(", "))}`:""}<br><span title="${esc(i.name)}">${esc((i.name||"").split("/").pop().slice(0,24))}</span></figcaption><button class="btn sm danger" data-act="not_product" data-id="${i.id}" type="button">Not this product</button></figure>`).join("")}</div></details>`}
+  return `<details class="plan"><summary><b>Photos in this cluster</b><span class="chip mute">${a.length}</span></summary><div class="disc">${a.map(i=>`<figure><a href="${esc(i.src)}" target="_blank" rel="noopener"><img src="${esc(i.src)}" alt="" style="opacity:1"></a><figcaption>${i.primary?"<b>main</b> · ":""}${esc(i.angle||"no angle")}<br>${i.w}×${i.h} · ${esc(i.source)}${i.match?`<br>filed by: ${esc(i.match)}`:""}${i.web?`<br><a href="${esc(i.web)}" target="_blank" rel="noopener">official image</a>`:""}${i.sharpness!=null?`<br>sharpness ${esc(i.sharpness)}`:""}${i.flags&&i.flags.length?`<br>⚠ ${esc(i.flags.join(", "))}`:""}<br><span title="${esc(i.name)}">${esc((i.name||"").split("/").pop().slice(0,24))}</span></figcaption><button class="btn sm danger" data-act="not_product" data-id="${i.id}" type="button">Not this product</button></figure>`).join("")}</div></details>`}
 function disc(r){const d=r.discarded||[];if(!d.length)return "";
   return `<details class="plan"><summary><b>Discarded photos</b><span class="chip warn">${d.length}</span></summary><div class="disc">${d.map(i=>`<figure><img src="${esc(i.src)}" alt="Discarded photo"><figcaption>${esc((i.discarded||{}).reason||"")}</figcaption><button class="btn sm" data-act="restore" data-id="${i.id}" type="button">Restore</button></figure>`).join("")}</div></details>`}
 const MF=[["summary","Product"],["text","Exact text / logo"],["colours","Colours"],["shape","Shape & proportions"],["parts","Parts & counts"],["material","Material & finish"],["size","Real size"],["must_keep","Must never change"],["watch","Watch out (past mistakes)"]];
@@ -165,6 +175,7 @@ function card(r){const s=ST[r.status]||["mute",r.status], p=r.primary;
   ${r.notes?`<div class="note">${esc(r.notes)}</div>`:""}${r.in_shoot?`<div class="hint">Shots: ${r.shots.length?r.shots.join(", "):"default"}${r.note?" · "+esc(r.note):""}</div>`:""}
   ${r.status=="low_quality"&&p?`<div class="acts"><button class="btn sm" data-act="use_anyway" data-id="${p.id}" type="button">Use anyway</button></div>`:""}
   ${p&&!D.cutouts?kit(r):""}
+  ${r.key?`<div class="acts"><button class="btn sm" data-web="${esc(r.key)}" type="button" title="Find this exact product on the brand's official website and add its photos">Fetch official photos</button></div>`:""}
   ${p&&!D.cutouts?plan(r):""}
   ${photos(r)}
   ${disc(r)}
@@ -176,6 +187,8 @@ document.addEventListener("click",async e=>{
   const f=e.target.closest("[data-f]"); if(f){filter=f.dataset.f;render();return}
   const a=e.target.closest("[data-act]"); if(a){try{await api(`/api/library/images/${a.dataset.id}`,{method:"POST",body:{action:a.dataset.act}});await load();kick()}catch(x){toast(x.message)}return}
   const kb=e.target.closest("[data-kit]"); if(kb){try{await api(`/api/library/products/${encodeURIComponent(kb.dataset.kit)}/kit`,{method:"POST"});toast("Making the extra views…");poll()}catch(x){toast(x.message)}return}
+  const sg=e.target.closest("[data-sug]"); if(sg){const inp=document.querySelector(`[data-code="${sg.dataset.for}"]`);if(inp)inp.value=sg.dataset.sug;return}
+  const wb=e.target.closest("[data-web]"); if(wb){try{await api(`/api/library/products/${encodeURIComponent(wb.dataset.web)}/web`,{method:"POST"});toast("Looking for it on the brand website…");poll()}catch(x){toast(x.message)}return}
   const pl=e.target.closest("[data-plan]"); if(pl){try{await api(`/api/library/products/${encodeURIComponent(pl.dataset.plan)}/plan`,{method:"POST"});toast("Analysing the product with the best model…");poll()}catch(x){toast(x.message)}return}
   const pa=e.target.closest("[data-papprove]"); if(pa){try{const r=await api(`/api/library/products/${encodeURIComponent(pa.dataset.key)}/plan`,{method:"PUT",body:{approved:pa.dataset.papprove=="1"}});toast(pa.dataset.papprove=="1"?`Plan approved${r.released?` · ${r.released} product(s) back in the queue`:""}`:"Plan un-approved");await load()}catch(x){toast(x.message)}return}
   const ps=e.target.closest("[data-psave]"); if(ps){const ta=document.querySelector(`[data-pj="${CSS.escape(ps.dataset.psave)}"]`);try{await api(`/api/library/products/${encodeURIComponent(ps.dataset.psave)}/plan`,{method:"PUT",body:{json_text:ta.value}});toast("Plan saved, approve it when ready");await load()}catch(x){toast(x.message)}return}
@@ -186,6 +199,8 @@ document.addEventListener("click",async e=>{
   const g=e.target.closest("[data-assign]"); if(g){const code=document.querySelector(`[data-code="${g.dataset.assign}"]`).value.trim(); if(!code)return toast("Type a product code");
     try{await api(`/api/library/images/${g.dataset.assign}`,{method:"POST",body:{action:"assign",code}});toast("Assigned to "+code);await load();kick()}catch(x){toast(x.message)}}
 });
+$("#web-all").onclick=async()=>{try{await api("/api/library/web-queue",{method:"POST"});toast("Fetching official photos for queued products…");poll()}catch(x){toast(x.message)}};
+$("#rematch").onclick=async()=>{try{await api("/api/library/rematch",{method:"POST"});toast("Re-matching unmatched photos…");poll()}catch(x){toast(x.message)}};
 $("#plan-all").onclick=async()=>{try{await api("/api/library/plan-all",{method:"POST"});toast("Analysing and planning queued products…");poll()}catch(x){toast(x.message)}};
 $("#scan").onclick=async()=>{const link=$("#drive").value.trim(); if(!link)return toast("Paste a Drive folder link");try{await api("/api/library/scan",{method:"POST",body:{link}});toast("Scanning Drive…");poll()}catch(x){toast(x.message)}};
 const drop=$("#drop"), inp=$("#files");

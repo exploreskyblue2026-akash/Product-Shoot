@@ -941,3 +941,97 @@ def test_inspector_trace_prompt_override_and_hero_gate():
     finally:
         mock.MockProvider.generate = og
         c.put("/api/admin/settings", json={"hero_review": False})
+
+
+def test_website_reader_ladder_and_brand_reset():
+    import io
+    from PIL import Image, ImageDraw
+    from app.connectors import website
+    from app import library
+    from app.db import SessionLocal, LibProduct, LibImage
+    from sqlalchemy import select
+    html = '''<html><head><meta property="og:title" content="Filled double decker pencil case Be Wool orange">
+      <meta name="description" content="Double decker pencil case 19 x 13 x 6 cm">
+      <meta property="og:image" content="https://www.milan.es/cdnassets/productsImages/aa_081264bw_01_m.webp"></head>
+      <body><h1>Filled double decker</h1><p>Ref: 081264BW</p><p>EAN: 8411574089070</p><p>Size 19 x 13 x 6 cm</p>
+      <img src="/cdnassets/productsImages/831e2656d07037a673764d9f1ee9fbdfccc1a196_081264bw_01_l.webp">
+      <img src="/cdnassets/productsImages/831e2656d07037a673764d9f1ee9fbdfccc1a196_081264bw_01_m.webp">
+      <img src="/cdnassets/productsImages/7b51ce76e60ec16072da3b5c1f5f6c5c8aa6b521_081264bw_02_adl.webp">
+      <img src="/img/logo.png"><img src="/cdnassets/productsImages/ff_999999zz_01_l.webp"></body></html>'''
+    f = website.page_facts(html)
+    assert "081264BW" in f["refs"] and "8411574089070" in f["eans"] and f["dimensions"]
+    imgs = website.page_images(html, "https://www.milan.es/en/x", ["081264BW"])
+    assert len(imgs) == 2 and all("081264bw" in u for u in imgs) and any(u.endswith("_01_l.webp") for u in imgs)
+    idx = {"pages": {"https://www.milan.es/en/x": {"r": ["081264BW"], "e": ["8411574089070"]}}}
+    assert website.lookup(idx, "8411574089070", []) == "https://www.milan.es/en/x"
+    assert website.lookup(idx, "", ["081264bw"]) == "https://www.milan.es/en/x"
+    # a page that does not show the product's code/EAN is refused
+    og = website._get
+    website._get = lambda url, client: html
+    try:
+        try:
+            website.fetch_product("https://www.milan.es/en/x", "8400000000000", ["ZZZ999"])
+            assert False, "should refuse"
+        except ValueError:
+            pass
+        assert website.fetch_product("https://www.milan.es/en/x", "8411574089070", [])["verified_by"] == "EAN"
+    finally:
+        website._get = og
+    # matching ladder: article number + a colour suffix that fits exactly one product
+    class P:
+        def __init__(s, k): s.key, s.product_id = k, k
+    lidx = {k: P(k) for k in ["185010920LV", "176568920SN", "176568920FN", "6110224MET"]}
+    p, how, sugg = library.match_name("Raw input/Milan/185010920_04.jpg", lidx)
+    assert p and p.key == "185010920LV" and "article number" in how
+    p, how, sugg = library.match_name("176568920_01.jpg", lidx)
+    assert p is None and set(sugg) == {"176568920SN", "176568920FN"}
+    assert library.match_name("176541125_01.jpg", lidx) == (None, "", [])
+    # brand reset removes photos and unfinished queue items, keeps master rows
+    c = client()
+    def ph():
+        im = Image.new("RGB", (900, 900), (240, 240, 240)); ImageDraw.Draw(im).rectangle([200, 200, 700, 700], fill=(9, 9, 9))
+        b = io.BytesIO(); im.save(b, "JPEG"); return b.getvalue()
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (Path(__file__).parent / "library" / "master.xlsx").read_bytes(), "x/y")),
+                                         ("files", ("KR18-05-BR reset.jpg", ph(), "image/jpeg"))])
+    wait_job(c)
+    with SessionLocal() as s:
+        lp = s.scalar(select(LibProduct).where(LibProduct.key == "KR1805BR"))
+        assert lp is not None
+        from app.brands import brand_key_for, brand_rows
+        bk = brand_key_for(lp, brand_rows(s))
+        before = s.query(LibProduct).count()
+    r = c.post(f"/api/brands/{bk}/reset").json()
+    assert r["ok"] and r["photos"] >= 1
+    with SessionLocal() as s:
+        assert s.query(LibProduct).count() == before
+        assert not list(s.scalars(select(LibImage).where(LibImage.key == "KR1805BR")))
+
+
+def test_hybrid_hero_keeps_real_pixels_for_clean_packshot():
+    import io, openpyxl
+    from PIL import Image, ImageDraw
+    c = client()
+    c.post("/api/library/clear")
+    c.put("/api/admin/settings", json={"engine_mode": "hybrid", "planner_on": True, "plan_review": "never",
+                                       "max_cost_product": 5, "daily_budget": 100, "default_shots": [1], "hero_gate": False,
+                                       "retries": 0, "model_hero": "", "escalate_model": ""})
+    im = Image.new("RGB", (1600, 2000), (248, 248, 248)); ImageDraw.Draw(im).rectangle([500, 500, 1100, 1500], fill=(20, 60, 200))
+    b = io.BytesIO(); im.save(b, "JPEG", quality=95)
+    wb = openpyxl.Workbook(); ws = wb.active; ws.append(["SHOOT", "SHOTS"]); ws.append(["KR18/05/BR", "1"]); sb = io.BytesIO(); wb.save(sb)
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (Path(__file__).parent / "library" / "master.xlsx").read_bytes(), "x/y")),
+                                         ("files", ("hy_shoot.xlsx", sb.getvalue(), "x/y")),
+                                         ("files", ("KR18-05-BR front.jpg", b.getvalue(), "image/jpeg"))])
+    wait_job(c)
+    try:
+        c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": True, "auto_approve": False})
+        c.post("/api/v2/load-shoot")
+        while pipeline.tick():
+            pass
+    finally:
+        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+        c.put("/api/admin/settings", json={"engine_mode": "classic"})
+    from app.db import SessionLocal, Product
+    with SessionLocal() as s:
+        p = next(x for x in s.query(Product).all() if (x.data or {}).get("lib_key") == "KR1805BR")
+        hero = next(sh for sh in p.shots if sh.no == 1)
+        assert hero.image_path and (hero.qc or {}).get("how", {}).get("method") == "edit" and hero.qc["how"]["exact"]

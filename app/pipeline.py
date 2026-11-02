@@ -61,10 +61,11 @@ def shot_card(s: Session, p: Product, kind: str) -> dict:
     return ((row.get("shots") or {}).get(kind) or {}) if (row.get("shots") or {}).get(kind, {}).get("mode") == "custom" else {}
 
 
-def _render_accurate(s, p, sh, spec, prov, model, size, refs, style, angle_raw, facts, correction, fallback_raw):
+def _render_accurate(s, p, sh, spec, prov, model, size, refs, style, angle_raw, facts, correction, fallback_raw,
+                     card: dict | None = None):
     """One shot with the accuracy engine. Returns (final jpeg, how)."""
     from . import engine
-    card = shot_card(s, p, sh.kind)
+    card = card if card is not None else shot_card(s, p, sh.kind)
     method, src_rel = engine.plan(sh.kind, angle_raw, card)
     src = storage.read(src_rel) if src_rel else fallback_raw
     how = {"method": method}
@@ -101,6 +102,10 @@ def _render_accurate(s, p, sh, spec, prov, model, size, refs, style, angle_raw, 
     sh.model = used
     _charge(s, p, "image", used, config.image_cost(used, size), sh)
     return img, {**how, "method": "fresh"}
+
+
+def _j_list(v) -> str:
+    return ", ".join(str(x) for x in v) if isinstance(v, list) else str(v or "")
 
 
 def _sheet(images: list) -> bytes:
@@ -430,9 +435,27 @@ def process(pid: int, only: list[int] | None = None):
                     break
                 sh.attempts = (sh.attempts or 0) + 1
                 how = {"method": "fresh"}
-                if accurate:
-                    img, how = _render_accurate(s, p, sh, spec, prov, model, size, refs, style, angle_raw, facts,
-                                                prompt if attempt else "", shot_raw)
+                real_px = False
+                if (not accurate and no == 1 and get_setting(s, "engine_mode", "classic") == "hybrid" and kept
+                        and not override):
+                    from . import engine as _eng
+                    try:                                  # clean, high-res packshot: keep the real product pixels
+                        from PIL import Image as _PI
+                        import io as _io2
+                        _im = _PI.open(_io2.BytesIO(shot_raw))
+                        real_px = max(_im.size) >= 1200 and _eng.place(shot_raw, "hero")["ok"]
+                    except Exception:
+                        real_px = False
+                if accurate or real_px:
+                    card_acc = None
+                    if real_px and plan is not None:
+                        ps = (plan.get("shots") or {}).get("hero") or {}
+                        card_acc = {"mode": "custom", "method": "edit", "scene": ps.get("scene", ""),
+                                    "background": ps.get("surface", ""), "props": _j_list(ps.get("props")),
+                                    "extra": ps.get("light", "")}
+                    img, how = _render_accurate(s, p, sh, spec, prov, model, size, refs, style,
+                                                {"front": main_rel} if real_px else angle_raw, facts,
+                                                prompt if attempt else "", shot_raw, card=card_acc)
                 else:
                     try:
                         img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=call_refs, style=None))

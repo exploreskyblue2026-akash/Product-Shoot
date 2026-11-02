@@ -18,6 +18,23 @@ from . import ingest, pipeline, secrets
 from contextlib import asynccontextmanager
 
 
+def _keep_awake():
+    """Render's free plan sleeps after 15 idle minutes, which also stops background jobs. Ping our own public URL every
+    10 minutes (Render sets RENDER_EXTERNAL_URL). Turn off with KEEP_AWAKE=false."""
+    import os
+    import time
+    import httpx
+    url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("KEEP_AWAKE_URL")
+    if not url or os.environ.get("KEEP_AWAKE", "true").lower() == "false":
+        return
+    while True:
+        time.sleep(600)
+        try:
+            httpx.get(url.rstrip("/") + "/api/health", timeout=20)
+        except Exception as e:
+            print(f"[keep-awake] ping failed: {str(e)[:120]}")
+
+
 @asynccontextmanager
 async def lifespan(_app):
     init_db()
@@ -28,6 +45,7 @@ async def lifespan(_app):
         import threading
         from .connectors import mirror
         threading.Thread(target=mirror.sweep_forever, daemon=True, name="mirror-sweep").start()
+        threading.Thread(target=_keep_awake, daemon=True, name="keep-awake").start()
     yield
 
 
@@ -1184,6 +1202,65 @@ def plan_all(u=Depends(need("editor"))):
         return f"{done} products analysed" + (f", {failed} failed" if failed else "")
     _bg("Analysing products", run)
     return {"ok": True}
+
+
+@app.post("/api/library/rematch")
+def rematch(u=Depends(need("editor"))):
+    _bg("Re-matching unmatched photos", lambda s: library.rematch_unmatched(s))
+    return {"ok": True}
+
+
+@app.post("/api/library/products/{key}/web")
+def web_one(key: str, u=Depends(need("editor"))):
+    _bg(f"Fetching {key} from the brand website", lambda s: library.web_fetch(s, key))
+    return {"ok": True}
+
+
+@app.post("/api/library/web-queue")
+def web_queue(u=Depends(need("editor"))):
+    """Fetch official photos for every shoot-sheet / brand-queue product (brands with a website)."""
+    from .brands import queued_keys
+
+    def run(s):
+        keys = [it.get("key") for it in (get_setting(s, "shoot_list", []) or []) if it.get("key")] + sorted(queued_keys(s))
+        ok = miss = 0
+        notes = []
+        for k in dict.fromkeys(keys):
+            try:
+                r = library.web_fetch(s, k)
+                ok += 1 if r["added"] else 0
+            except Exception as e:
+                s.rollback()
+                miss += 1
+                notes.append(f"{k}: {str(e)[:80]}")
+        return f"{ok} products got official photos, {miss} not found" + (f" (e.g. {notes[0]})" if notes else "")
+    _bg("Fetching official photos", run)
+    return {"ok": True}
+
+
+@app.post("/api/brands/{key}/web-index")
+def brand_web_index(key: str, u=Depends(need("editor"))):
+    """Read the brand's sitemap and product pages once (resumable), so products can be found by EAN / reference."""
+    import time as _t
+
+    def run(s):
+        t0, r = _t.time(), {}
+        while _t.time() - t0 < 25 * 60:
+            r = library.web_index(s, key, budget=150)
+            if r["indexed"] >= r["pages"]:
+                break
+        return f"{r.get('indexed', 0)} of {r.get('pages', 0)} pages read, {r.get('products_found', 0)} product pages found"
+    _bg(f"Indexing the {key} website", run)
+    return {"ok": True}
+
+
+@app.post("/api/brands/{key}/reset")
+def brand_reset(key: str, u=Depends(need("admin"))):
+    with SessionLocal() as s:
+        try:
+            return {"ok": True, **library.reset_brand(s, key)}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
 
 class MemoryIn(BaseModel):

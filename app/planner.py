@@ -62,7 +62,8 @@ SCHEMA = {
 }
 
 INSTRUCTIONS = """You are the art director and product analyst of an in-house e-commerce studio. Study ONLY the photos above
-(they are all filed under one product code) and the facts given. Do not use any other source, do not guess from the web.
+(they are all filed under one product code) and the facts given (master sheet, and the brand's OFFICIAL product page
+when present: use its dimensions and description). Do not use any other source, do not guess from the web.
 
 Do this in order and return ONE JSON object exactly in the schema at the end:
 1. PHOTO CHECK - for every photo (index 0..n-1, in the order given): is it THIS product (same code / name / colourway)? Is it
@@ -169,7 +170,8 @@ def make_plan(s: Session, key: str, prov, charge=None) -> dict:
     ld = lp.data or {}
     facts = {"product_id": lp.product_id, "name": lp.name, "brand": lp.brand, "category": lp.category,
              "ean": lp.ean, "seo_title": (ld.get("titles") or {}).get("seo optimised title", ""),
-             "photo_names": [i.src_name for i in imgs]}
+             "photo_names": [i.src_name for i in imgs],
+             "official_website": {k: v for k, v in (ld.get("web") or {}).items() if k in ("url", "title", "description", "dimensions")}}
     busy = any(w in (lp.name or "").lower() for w in ("set", " x", "pack", "assorted", "colours", "colors"))
     prompt = INSTRUCTIONS.format(hero_props="0-1 small props, the set itself is busy" if busy else "1-3 small props at the edges",
                                  static=static_rules(s), shot_rules=_shot_rules(s), brand=brand_txt,

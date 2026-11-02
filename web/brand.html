@@ -111,6 +111,10 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
       <div class="panel-h"><h2>Brand rulebook</h2><button class="btn sm primary" id="save" type="button">Save</button></div>
       <p class="hint" style="margin-top:0">These settings shape every image of this brand, on top of the SkyBlue house style.</p>
       <div class="two" id="fields"></div>
+      <div class="panel" style="margin-top:12px;padding:10px"><b>Official website</b> <span class="hint" id="web-st"></span>
+        <p class="hint" style="margin:4px 0 8px">The tool reads the site's product pages once and remembers which page shows which reference / EAN. Then the Library can fetch each product's official photos and size. Only pages that show the exact EAN or reference are used.</p>
+        <div class="acts"><button class="btn sm" id="web-index" type="button">Build / continue website index</button>
+        <button class="btn sm danger" id="reset" type="button" title="Removes this brand's photos, catalogue pictures, analyses and unfinished queue items. Master-sheet rows stay.">Reset this brand's photos</button></div></div>
       <div style="margin-top:12px"><div class="hint" style="margin-bottom:6px">Golden shots (max 3): the AI copies their light and mood, never their objects</div>
         <div class="gold" id="gold"></div></div>
     </section>
@@ -143,10 +147,11 @@ async function api(p,o={}){const fd=o.body instanceof FormData;const r=await fet
   if(r.status==401){location.href="/login";throw new Error("Signed out")} const j=await r.json().catch(()=>({})); if(!r.ok)throw new Error(j.detail||r.statusText); return j}
 function initials(n){return (n||"?").replace(/\(.*?\)/g,"").replace(/[^A-Za-z0-9 ]/g," ").trim().split(/\s+/).map(w=>w[0]).join("").slice(0,3).toUpperCase()||"?"}
 const KEY=decodeURIComponent(location.pathname.split("/").pop());
-const F=[["brand_name","Brand name"],["origin","Origin (Indian / Imported · country)"],["website","Website"],["products_estimate","Approx. products"],["positioning","Positioning / feel","ta"],["mood_override","Mood"],["hero_backdrop","Hero backdrop"],["palette_hex","Palette (hex, |-separated)"],["signature_props","Props allowed (|-separated)"],["human_allowed","People (none / hands / partial_person)"],["brand_dos","Do's","ta"],["brand_donts","Don'ts","ta"],["detect_keywords","Detect words (|-separated)"],["status","Status"]];
+const F=[["brand_name","Brand name"],["origin","Origin (Indian / Imported · country)"],["website","Website"],["web_locale","Website language path (e.g. /en/)"],["web_search","Website search URL (optional, use {code})"],["products_estimate","Approx. products"],["positioning","Positioning / feel","ta"],["mood_override","Mood"],["hero_backdrop","Hero backdrop"],["palette_hex","Palette (hex, |-separated)"],["signature_props","Props allowed (|-separated)"],["human_allowed","People (none / hands / partial_person)"],["brand_dos","Do's","ta"],["brand_donts","Don'ts","ta"],["detect_keywords","Detect words (|-separated)"],["status","Status"]];
 const ST={ready:["ok","Ready"],low_quality:["warn","Photo quality"],needs_photo:["bad","Needs photo"],skipped:["mute","Skipped"]};
 let D=null,ALL=[];
 async function load(){D=await api(`/api/brands/${encodeURIComponent(KEY)}?q=${encodeURIComponent($("#search").value)}`);ALL=await api("/api/brands");
+  {const w=D.web||{};$("#web-st").textContent=w.pages?`· ${w.indexed} of ${w.pages} pages read · ${w.found} product pages found${w.at?" · "+w.at.replace("T"," "):""}`:"· not indexed yet";}
   const me=ALL.find(b=>b.key==KEY)||{};const name=KEY=="_default"?"SkyBlue house style":(D.profile.brand_name||KEY);
   document.title=name+" · Skyblue";$("#bname").textContent=name;
   $("#bmeta").innerHTML=[D.profile.origin,D.profile.website?`<a href="${esc(D.profile.website)}" target="_blank" rel="noopener">${esc(D.profile.website)}</a>`:"",KEY=="_default"?"":`${D.in_master} products in master sheet${D.profile.products_estimate?` · ~${esc(D.profile.products_estimate)} expected`:""}`].filter(Boolean).join(" · ");
@@ -198,6 +203,9 @@ $("#add-codes").onclick=async()=>{const codes=$("#codes").value.split(/[\n,;]+/)
   try{const r=await api(`/api/brands/${encodeURIComponent(KEY)}/queue/add`,{method:"POST",body:{codes}});$("#codes").value="";toast(`Added ${r.added.length}${r.unknown.length?` · not found: ${r.unknown.join(", ")}`:""}`);await load()}catch(x){toast(x.message)}};
 $("#rank").onchange=async()=>{const v=$("#rank").value;let order=ALL.filter(b=>b.rank!=null&&b.key!=KEY).sort((a,b)=>a.rank-b.rank).map(b=>b.key);
   if(v)order.splice(+v-1,0,KEY);try{await api("/api/brands-order",{method:"PUT",body:{keys:order}});toast(v?`${D.profile.brand_name||KEY} is now brand #${v}`:"Removed from brand order");await load()}catch(x){toast(x.message)}};
+$("#web-index").onclick=async()=>{try{await api(`/api/brands/${encodeURIComponent(KEY)}/web-index`,{method:"POST"});toast("Reading the website in the background (can take 10-30 min). Reload this page to see progress.")}catch(x){toast(x.message)}};
+$("#reset").onclick=async()=>{const n=D.profile.brand_name||KEY;if(prompt(`This removes ALL photos, catalogue pictures, analyses and unfinished queue items of ${n}. Master-sheet rows stay. Type RESET to confirm.`)!=="RESET")return;
+  try{const r=await api(`/api/brands/${encodeURIComponent(KEY)}/reset`,{method:"POST"});toast(`${n}: ${r.photos} photos and ${r.queue_items} queue items removed, ${r.products_kept} products kept`);await load()}catch(x){toast(x.message)}};
 $("#send").onclick=async()=>{try{const r=await api(`/api/brands/${encodeURIComponent(KEY)}/send`,{method:"POST"});toast(`${r.total} sent to the studio: ${r.total-r.waiting-r.missing} ready, ${r.waiting} waiting for photos`)}catch(x){toast(x.message)}};
 let st=null;$("#search").addEventListener("input",()=>{clearTimeout(st);st=setTimeout(load,300)});
 load().catch(e=>toast(e.message));
