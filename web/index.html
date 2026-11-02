@@ -98,6 +98,16 @@ button.li{cursor:pointer}button.li:hover{border-color:var(--azure)}
 @keyframes load{to{background-position:-200% 0}}
 .p0{background:var(--surface)}.p1{background:var(--celeste-soft)}.p2{background:var(--peach-soft)}.p3{background:var(--blush-soft)}.p4{background:var(--sunk)}
 
+.insp{margin-top:14px}.insp summary{cursor:pointer;font-weight:700;font-size:15px}
+.insp h3{font-size:13px;margin:14px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.ph{display:flex;gap:8px;flex-wrap:wrap}.ph figure{margin:0;width:118px;font-size:11px;color:var(--muted);line-height:1.3}
+.ph img{width:118px;height:118px;object-fit:contain;background:var(--sunk);border-radius:6px;border:2px solid transparent}
+.ph figure.sent img{border-color:var(--azure)}.ph figure.bad img{opacity:.55;border-color:var(--bad,#c44)}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+.pcard{border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.pcard textarea{width:100%;min-height:210px;font-family:var(--f-mono,monospace);font-size:11.5px;line-height:1.4}
+.pcard .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.facts{display:grid;grid-template-columns:110px 1fr;gap:3px 10px;font-size:12.5px}.facts dt{color:var(--muted)}.facts dd{margin:0}
 .decide{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:14px}
 @media (max-width:1100px){.decide{grid-template-columns:minmax(0,1fr)}}
 .actions{display:flex;flex-wrap:wrap;gap:8px}
@@ -223,6 +233,7 @@ body{margin:0}[hidden]{display:none!important}
         <ul class="qc" id="qc"></ul>
       </section>
     </div>
+    <details class="panel insp" id="insp"><summary>Inspector · what the tool used for this product</summary><div id="insp-body"></div></details>
   </main>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
@@ -260,8 +271,31 @@ function renderLeft(){
   $("#admin-link").hidden=!(S.user.role=="admin"||S.user.role=="owner")}
 function li(q,extra){return `<button type="button" class="li${q.id===cur?" now":""}" data-id="${q.id}"><span class="ic">${esc((q.brand||q.code).slice(0,2).toUpperCase())}</span><span style="min-width:0"><b class="mono">${esc(q.code)}</b><small>${esc(q.name)}</small></span>${extra}</button>`}
 
+const KN=["Hero","Detail","Use case","Lifestyle"];
+const JS=v=>Array.isArray(v)?v.map(x=>typeof x=="object"&&x?Object.values(x).filter(Boolean).join(" "):x).join(", "):typeof v=="object"&&v?Object.values(v).filter(x=>x!==""&&x!=null).join(" · "):(v??"");
+let inspSig="";
+function renderInspect(){const b=$("#insp-body");if(!P){b.innerHTML="";inspSig="";return}
+  if(b.contains(document.activeElement)&&document.activeElement.tagName=="TEXTAREA")return;   // don't wipe your edits
+  const T=P.trace||{photos:[],discarded:[],plan:null},sig=JSON.stringify([P.id,T,P.shots.map(s=>[s.prompt,s.override,s.sent,s.model])]);if(sig==inspSig)return;inspSig=sig;
+  const sentAll=new Set(P.shots.flatMap(s=>s.sent||[]));
+  const fig=(i,cls,cap)=>`<figure class="${cls}"><a href="${esc(i.src)}" target="_blank" rel="noopener"><img src="${esc(i.src)}" alt="" loading="lazy"></a>${cap}</figure>`;
+  const pl=T.plan,ap=(pl&&pl.appearance)||{};
+  b.innerHTML=`
+  <h3>1 · Clustering: photos filed under this code</h3>
+  <div class="ph">${T.photos.map(i=>fig(i,sentAll.has(i.src)?"sent":"",`${esc(i.w)}×${esc(i.h)} · ${esc(i.angle||"no angle")}${i.primary?" · main":""}<br>${esc(i.source)}${i.sharpness!=null?" · sharp "+esc(i.sharpness):""}${i.flags&&i.flags.length?"<br>⚠ "+esc(i.flags.join(", ")):""}${sentAll.has(i.src)?"<br><b>sent to the image model</b>":""}<br><span title="${esc(i.name)}">${esc((i.name||"").split("/").pop().slice(0,34))}</span>`)).join("")||'<span class="hint">No library photos (added directly to the queue).</span>'}</div>
+  ${T.discarded.length?`<h3>Discarded for this code</h3><div class="ph">${T.discarded.map(i=>fig(i,"bad",`${esc(i.reason||"skipped")}<br><button class="btn sm" type="button" data-restore="${i.id}">Restore</button>`)).join("")}</div>`:""}
+  <h3>2 · Analysis${pl?` · ${esc(pl.model||"")}${pl.approved?" · approved":pl.review?" · needs review":""}${pl.stale?" · photos changed, re-analyse":""}`:""}</h3>
+  ${pl?`<dl class="facts"><dt>Product</dt><dd>${esc(JS(pl.identity))}</dd><dt>Colours</dt><dd>${esc(JS(ap.colours))}</dd><dt>Material</dt><dd>${esc(JS(ap.materials))} ${esc(ap.finish||"")}</dd>
+    <dt>Logo</dt><dd>${esc(JS(ap.logo))}</dd><dt>Printed text</dt><dd>${esc(JS(ap.printed_text))}</dd><dt>Must keep</dt><dd>${esc(JS(pl.must_keep))}</dd><dt>Risks</dt><dd>${esc(JS(pl.risks))}</dd>${pl.why?`<dt>Review why</dt><dd>${esc(pl.why)}</dd>`:""}</dl>
+    <p class="hint" style="margin:6px 0 0">Wrong? Fix it in the <a href="/library">Library</a> (Analysis &amp; shot plan → Edit / Re-analyse).</p>`:'<p class="hint">No analysis yet. It runs automatically before the first shot.</p>'}
+  <h3>3 · Prompts &amp; photos sent for each shot</h3>
+  <div class="pgrid">${P.shots.map((s,i)=>`<div class="pcard"><div class="row"><b>${i+1} · ${KN[i]}</b>${s.model?`<span class="chip mute mono">${esc(s.model)}</span>`:""}${s.override?'<span class="chip warn">your edited prompt</span>':""}</div>
+    ${s.sent&&s.sent.length?`<div class="ph">${s.sent.map((u,k)=>`<figure class="sent"><img src="${esc(u)}" alt="" style="width:64px;height:64px"><br>${k==0?"main photo":"extra photo"}</figure>`).join("")}${s.sent_hero?'<figure><span class="hint">+ approved hero</span></figure>':""}</div>`:'<span class="hint">Not generated yet.</span>'}
+    <textarea data-pt="${s.no}" spellcheck="false" placeholder="The prompt appears after the first generation. You can also write your own here.">${esc(s.override||s.prompt||"")}</textarea>
+    <div class="row"><button class="btn sm" type="button" data-copy="${s.no}">⧉ Copy</button><button class="btn sm primary" type="button" data-pregen="${s.no}">Save &amp; regenerate</button>${s.override?`<button class="btn sm" type="button" data-preset="${s.no}">Back to planned prompt</button>`:""}</div></div>`).join("")}</div>
+  <p class="hint">Blue border = sent to the image model. Use <b>Adjust note</b> above for a quick tweak, or edit the whole prompt here. Your edited prompt is used for that shot until you go back to the planned one.</p>`}
 function renderStage(){
-  if(!P){$("#p-code").textContent="—";$("#p-name").textContent="Add an input to start";$("#gallery").innerHTML="";$("#actions").innerHTML="";$("#qc").innerHTML="";$("#p-state").textContent="—";return}
+  if(!P){$("#p-code").textContent="—";$("#p-name").textContent="Add an input to start";$("#gallery").innerHTML="";$("#actions").innerHTML="";$("#qc").innerHTML="";$("#p-state").textContent="—";renderInspect();return}
   $("#p-code").textContent=P.code+(P.brand?" · "+P.brand:"");$("#p-name").textContent=P.name;
   const fl={needs_photo:1,queue:1,gen:2,error:2,review:3,saved:4}[P.stage]||1;["f1","f2","f3","f4"].forEach((f,i)=>{$("#"+f).className=i+1<fl?"done":i+1==fl?"on":""});
   $("#p-bar").style.width=({queue:5,needs_photo:2,gen:20+P.done*12,error:20+P.done*12,review:85,saved:100}[P.stage]||5)+"%";
@@ -275,6 +309,7 @@ function renderStage(){
   const HOW={edit:"Real photo kept · background made by AI",edit_zoom:"Real photo kept · wider scene made by AI",crop:"Close-up cropped from the real photo (no AI)",fresh:"Fully generated from the Product Kit"};
   const hw=(s.qc&&s.qc.how)||null;
   $("#qc").innerHTML=(s.model?`<li class="hint">Made with <b class="mono">${esc(s.model)}</b></li>`:"")+(hw?`<li class="hint"><b>${esc(HOW[hw.method]||hw.method)}</b>${hw.method!="crop"&&hw.method!="fresh"?(hw.exact?" · product pixels restored":" · AI moved the product, checked by QC"):""}${hw.upscaled>1.5?` · photo enlarged ${hw.upscaled}×, use a bigger photo`:""}</li>`:"")+((s.qc&&s.qc.unchecked)?`<li class="hint">${esc(s.qc.reasons.qc)}</li>`:c&&Object.keys(c).length?Object.entries(c).map(([k,ok])=>`<li title="${esc(why[k]||"")}"><span class="${ok?"y":"n"}" aria-hidden="true">${ok?"✓":"✕"}</span>${QCL[k]||k}${ok?"":`<span class="hint">&nbsp;${esc(why[k]||"")}</span>`}<span class="sr">${ok?" passed":" failed"}</span></li>`).join(""):'<li class="hint">Checks run when the shot is generated.</li>');
+  renderInspect();
   $("#qc-score").textContent=c?Object.values(c).filter(Boolean).length+"/"+Object.keys(c).length+(s.attempts>1?" · "+s.attempts+" tries":""):"";
   const has=P.shots.some(x=>x.image),idle=P.stage!="gen",missL=P.shots.filter(x=>!x.image&&!(P.v2&&P.shots_wanted.length&&!P.shots_wanted.includes(x.no))).map(x=>x.no),miss=missL.join(", ");
   $("#actions").innerHTML=`${P.stage=="queue"||P.stage=="error"?`<button class="btn primary" type="button" data-act="run">Generate now</button>`:""}<button class="btn ${P.stage=="queue"||P.stage=="error"?"":"primary"}" type="button" data-act="approve" ${(P.stage=="review"&&has)||(P.stage=="saved"&&miss)?"":"disabled"}>${miss?"Approve &amp; make shots "+miss:"Approve all &amp; save"}</button><button class="btn" type="button" data-act="regen" ${idle&&(has||P.stage!="queue")?"":"disabled"}>${P.shots[sel].image?"Regenerate":"Generate"} shot ${sel+1}</button><button class="btn" type="button" data-act="skip">Next product</button><button class="btn danger" type="button" data-act="reject" ${idle?"":"disabled"}>Reject product</button>${P.stage!="saved"?`<button class="btn" type="button" data-act="up" title="Move up in the queue">↑</button><button class="btn" type="button" data-act="down" title="Move down in the queue">↓</button><button class="btn" type="button" data-act="top">To top</button><button class="btn" type="button" data-act="pause">${P.paused?"Resume":"Pause"}</button>`:""}${P.stage!="saved"?`<button class="btn" type="button" data-act="remove" ${idle?"":"disabled"} title="${idle?"":"Press Stop first"}">Remove from queue</button>`:""}`}
@@ -291,6 +326,10 @@ async function act(kind){if(busy||!P)return;busy=true;try{
   await refresh()}catch(e){toast(e.message)}finally{busy=false}}
 
 document.addEventListener("click",async e=>{
+  const cp=e.target.closest("[data-copy]");if(cp){const ta=document.querySelector(`[data-pt="${cp.dataset.copy}"]`);try{await navigator.clipboard.writeText(ta.value);toast("Prompt copied")}catch(x){ta.select();toast("Press Ctrl+C to copy")}return}
+  const pg=e.target.closest("[data-pregen]");if(pg){const no=+pg.dataset.pregen,ta=document.querySelector(`[data-pt="${no}"]`);try{await api(`/api/products/${P.id}/prompt/${no}`,{method:"PUT",body:{prompt:ta.value}});await api(`/api/products/${P.id}/regenerate`,{method:"POST",body:{shot:no,note:""}});inspSig="";toast(`Regenerating shot ${no} with your prompt`);await refresh()}catch(x){toast(x.message)}return}
+  const pr=e.target.closest("[data-preset]");if(pr){try{await api(`/api/products/${P.id}/prompt/${pr.dataset.preset}`,{method:"PUT",body:{prompt:""}});inspSig="";toast("Back to the planned prompt");await refresh()}catch(x){toast(x.message)}return}
+  const rs=e.target.closest("[data-restore]");if(rs){try{await api(`/api/library/images/${rs.dataset.restore}`,{method:"POST",body:{action:"restore"}});inspSig="";toast("Photo restored: the product will be re-analysed before the next shot");await refresh()}catch(x){toast(x.message)}return}
   const rm=e.target.closest("[data-remove]");if(rm){e.preventDefault();try{await api(`/api/products/${rm.dataset.remove}`,{method:"DELETE"});if(cur==+rm.dataset.remove){cur=null;P=null}toast("Removed from the queue");await refresh()}catch(x){toast(x.message)}return}
   const l=e.target.closest(".li[data-id]");if(l){cur=+l.dataset.id;sel=0;refresh();if(innerWidth<=900)$("#top").scrollIntoView({behavior:"smooth"});return}
   const sh=e.target.closest(".shot");if(sh){sel=+sh.dataset.shot;$("#gallery").dataset.sig="";renderStage();return}

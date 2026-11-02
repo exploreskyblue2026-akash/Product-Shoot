@@ -53,8 +53,10 @@ SCHEMA = {
     "risks": ["what an image AI is likely to get wrong"],
     "must_keep": ["short list of things that must never change"],
     "shots": {k: {"goal": "", "scene": "", "surface": "", "camera": "angle + lens feel", "composition": "placement + % of frame",
-                  "props": ["plain, unbranded"], "hands": "none or who/how", "product_state": "", "light": "", "notes": ""}
+                  "props": ["plain, unbranded"], "hands": "none or who/how", "product_state": "", "light": "", "notes": "",
+                  "reference_photo": "index of the photo the image model should copy for this shot"}
               for k in SHOTS},
+    "best_reference": "index of the ONE photo that shows the whole single product most clearly (shape, colour, clip, logo)",
     "review_needed": False,
     "review_reason": "",
 }
@@ -66,8 +68,11 @@ Do this in order and return ONE JSON object exactly in the schema at the end:
 1. PHOTO CHECK - for every photo (index 0..n-1, in the order given): is it THIS product (same code / name / colourway)? Is it
    usable as a product reference (not a catalogue page, not a group of different products, not blurry or tiny)? Its angle.
    Mark wrong or unusable photos with a short reason. Be strict: a different colourway or design is NOT this product.
-2. IDENTITY - type, form, parts, item count, states.
-3. EXACT APPEARANCE - colours with hex and where they are, materials, finish, pattern and its placement, EVERY printed
+2. IDENTITY - type, form, parts, item count, states. If the photos show several identical items (e.g. 3 of the same pen)
+   but the name does not say set/pack, the product is ONE item; say so. If they are different variants, only the one
+   matching the code/name is this product.
+3. EXACT APPEARANCE - describe colours exactly as they look in the photos (e.g. gunmetal / smoky dark chrome is NOT
+   bright silver); when lighting makes a colour uncertain, say so. Colours with hex and where they are, materials, finish, pattern and its placement, EVERY printed
    word exactly as written with its position, the logo (text, form, position), hardware, and the exact order for sets.
 4. SIZE - use any measurement visible in a photo or given in the facts; otherwise estimate from the product type and mark
    "estimated": true.
@@ -81,7 +86,10 @@ Do this in order and return ONE JSON object exactly in the schema at the end:
    order). USE CASE shows the right user using it in the right place (hands only if they fit the use and the brand allows).
    LIFESTYLE shows its world, wider, in the brand mood. Only plan angles and parts the photos actually show.
    Keep every plan concrete and short (each field one sentence).
-9. review_needed = true when the photos are unclear, contradictory, show several products, or the product is hard to
+9. REFERENCES - best_reference: the index of the photo showing the whole product most clearly. For each shot,
+   reference_photo: the index of the photo the image model should copy (usually best_reference; a close-up for detail
+   only if it shows the planned feature).
+10. review_needed = true when the photos are unclear, contradictory, show several products, or the product is hard to
    reproduce (fine text, complex pattern, many items); say why in review_reason.
 
 STUDIO RULES (always):

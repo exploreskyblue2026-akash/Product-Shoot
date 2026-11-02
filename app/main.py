@@ -208,8 +208,61 @@ def product(pid: int, u=Depends(need("viewer"))):
                 "shots": [{"no": no, "kind": kind, "status": shots[no].status if no in shots else "wait",
                            "image": img_url(shots[no].image_path) if no in shots else "",
                            "qc": shots[no].qc if no in shots else {}, "attempts": shots[no].attempts if no in shots else 0,
-                           "model": shots[no].model if no in shots else ""}
-                          for no, kind in pipeline.SHOT_NAMES.items()]}
+                           "model": shots[no].model if no in shots else "",
+                           "prompt": shots[no].prompt if no in shots else "",
+                           "override": ((p.data or {}).get("prompt_override") or {}).get(str(no), ""),
+                           "sent": [img_url(r) for r in (((shots[no].qc or {}).get("sent") or {}).get("photos") or [])]
+                                   if no in shots else [],
+                           "sent_hero": bool(((shots[no].qc or {}).get("sent") or {}).get("hero")) if no in shots else False}
+                          for no, kind in pipeline.SHOT_NAMES.items()],
+                "trace": _trace(s, p)}
+
+
+def _trace(s, p) -> dict:
+    """Everything the tool used for this product, stage by stage, so a person can see where accuracy is lost."""
+    from .db import LibImage as _LI, LibProduct as _LP
+    key = (p.data or {}).get("lib_key")
+    if not key:
+        return {"photos": [], "discarded": [], "plan": None}
+    lp = s.scalar(select(_LP).where(_LP.key == key))
+    imgs = list(s.scalars(select(_LI).where(_LI.key == key, _LI.dup_of.is_(None))))
+    row = lambda i: {"id": i.id, "src": img_url(i.path), "name": i.src_name, "w": i.w, "h": i.h, "source": i.source,  # noqa: E731
+                     "angle": (i.meta or {}).get("angle", ""), "sharpness": (i.meta or {}).get("sharpness"),
+                     "flags": (i.meta or {}).get("flags", []), "primary": i.primary,
+                     "reason": ((i.meta or {}).get("discarded") or {}).get("reason", "")}
+    rec = (lp.data or {}).get("plan") if lp else None
+    plan = None
+    if rec:
+        j = rec.get("json") or {}
+        plan = {"model": rec.get("model"), "at": rec.get("at"), "approved": rec.get("approved"), "stale": rec.get("stale"),
+                "review": bool(j.get("review_needed")), "why": j.get("review_reason", ""),
+                "identity": j.get("identity"), "appearance": j.get("appearance"), "must_keep": j.get("must_keep"),
+                "risks": j.get("risks"), "best_reference": j.get("best_reference"), "key": key}
+    return {"photos": [row(i) for i in imgs if not (i.meta or {}).get("discarded") and i.cut_status != "skip"],
+            "discarded": [row(i) for i in imgs if (i.meta or {}).get("discarded") or i.cut_status == "skip"],
+            "plan": plan, "key": key}
+
+
+class PromptIn(BaseModel):
+    prompt: str = ""
+
+
+@app.put("/api/products/{pid}/prompt/{no}")
+def set_prompt(pid: int, no: int, body: PromptIn, u=Depends(need("editor"))):
+    """Your own version of one shot's prompt (empty = go back to the planned prompt)."""
+    if no not in pipeline.SHOT_NAMES:
+        raise HTTPException(400, "Shot must be 1-4")
+    with SessionLocal() as s:
+        p = _get(s, pid)
+        ov = dict((p.data or {}).get("prompt_override") or {})
+        if body.prompt.strip():
+            ov[str(no)] = body.prompt.strip()[:8000]
+        else:
+            ov.pop(str(no), None)
+        p.data = {**(p.data or {}), "prompt_override": ov}
+        log(s, u.email, f"{p.code} shot {no}: prompt {'edited' if body.prompt.strip() else 'reset to the plan'}")
+        s.commit()
+    return {"ok": True}
 
 
 class SourceIn(BaseModel):
@@ -588,7 +641,7 @@ SETTING_KEYS = ["engine_mode", "library_autoscan", "library_focus", "library_dri
                 "model_other", "file_naming", "min_raw_px", "output_drive_folder", "cost_mode", "default_shots",
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr",
                 "model_hero", "model_detail", "model_use_case", "model_lifestyle", "escalate_model",
-                "planner_on", "plan_review", "model_planner", "static_rules"]
+                "planner_on", "plan_review", "model_planner", "static_rules", "hero_review"]
 
 
 @app.get("/api/admin/settings")

@@ -103,6 +103,33 @@ def _render_accurate(s, p, sh, spec, prov, model, size, refs, style, angle_raw, 
     return img, {**how, "method": "fresh"}
 
 
+def _sheet(images: list) -> bytes:
+    """Reference photos side by side in one image, so QC compares against every view at once."""
+    import io as _io
+    from PIL import Image as _I
+    ims = []
+    for b in images:
+        if not b:
+            continue
+        try:
+            im = _I.open(_io.BytesIO(b)).convert("RGB")
+            im.thumbnail((900, 900))
+            ims.append(im)
+        except Exception:
+            pass
+    if len(ims) <= 1:
+        return images[0] if images else b""
+    h = max(i.height for i in ims)
+    out = _I.new("RGB", (sum(i.width for i in ims) + 20 * (len(ims) - 1), h), (255, 255, 255))
+    x = 0
+    for i in ims:
+        out.paste(i, (x, (h - i.height) // 2))
+        x += i.width + 20
+    buf = _io.BytesIO()
+    out.save(buf, "JPEG", quality=90)
+    return buf.getvalue()
+
+
 def style_text(s: Session, p: Product, prov) -> str:
     """The golden shots described in words once (cached). Pictures of other products are never shown to the image
     model, so it cannot copy them into the scene."""
@@ -236,6 +263,7 @@ def process(pid: int, only: list[int] | None = None):
         accurate = bool((p.data or {}).get("lib_key")) and get_setting(s, "engine_mode", "accurate") == "accurate"
         angle_raw = {}
         plan = None
+        kept, plan_refs = [], {}
         if (p.data or {}).get("lib_key"):
             from . import library as lib
             key = p.data["lib_key"]
@@ -268,8 +296,23 @@ def process(pid: int, only: list[int] | None = None):
             if lp is not None:
                 p.data = {**(p.data or {}), "memory": (lp.data or {}).get("memory") or {}}
             s.commit()
-            for r in lib.refs_with_angles(s, key, 4):
+            for r in lib.refs_with_angles(s, key, 6):
                 angle_raw.setdefault(r["angle"] or "unknown", r["path"])
+            rank = {"front": 0, "unknown": 1, "": 1, "angle": 2, "side": 3}     # whole-product views first
+            kept = [r["path"] for r in sorted(lib.refs_with_angles(s, key, 6), key=lambda r: rank.get(r["angle"] or "", 5))]
+            if plan is not None:
+                rec = (lp.data or {}).get("plan") or {}
+                ids = rec.get("photos") or []
+                def _rel(ix):
+                    try:
+                        img = s.get(lib.LibImage, ids[int(ix)])
+                    except (ValueError, TypeError, IndexError):
+                        return None
+                    return img.path if img is not None and img.path in kept else None
+                best = _rel(plan.get("best_reference"))
+                if best:
+                    kept = [best] + [k for k in kept if k != best]
+                plan_refs = {k: _rel(((plan.get("shots") or {}).get(k) or {}).get("reference_photo")) for k in SHOT_NAMES.values()}
             prompts = {x["no"]: x for x in build_prompts(s, p, p.analysis or {}, rv, notes)}   # now with product facts
         refs = []
         ref_paths = ((p.data or {}).get("refs") or [])[1:]
@@ -290,14 +333,25 @@ def process(pid: int, only: list[int] | None = None):
             s.commit()
             prompt = spec["prompt"]
             shot_raw = raw
-            if angle_raw:
-                want = ("front", "unknown", "angle", "side")       # every shot starts from the same main photo as the hero
-                rel = next((angle_raw[a] for a in want if a in angle_raw), None)
-                if rel:
+            main_rel = p.raw_path
+            if kept:                                          # verified photos of this exact code only
+                main_rel = plan_refs.get(sh.kind) or kept[0]
+                try:
+                    shot_raw = storage.read(main_rel)
+                except Exception:
+                    shot_raw, main_rel = raw, p.raw_path
+                extra_rels = [k for k in kept if k != main_rel]
+                refs = []
+                for rel in extra_rels:
                     try:
-                        shot_raw = storage.read(rel)
+                        refs.append(storage.read(rel))
                     except Exception:
-                        shot_raw = raw
+                        pass
+                    if len(refs) >= 2:
+                        break
+                sent_rels = [main_rel] + extra_rels[:len(refs)]
+            else:
+                sent_rels = [main_rel] + list(((p.data or {}).get("refs") or [])[1:3])
             facts = ""
             mem = (p.data or {}).get("memory") or {}
             if mem.get("facts"):
@@ -305,6 +359,12 @@ def process(pid: int, only: list[int] | None = None):
                 facts = memory_block(mem).split("\n", 1)[-1].replace("\n", "; ")
             hero_ref = None
             h = shots.get(1)
+            if (no != 1 and not accurate and get_setting(s, "hero_review", True) and h is not None and h.image_path
+                    and h.status != "approved"):
+                sh.status = "wait"
+                s.commit()
+                stop_reason = "Approve the hero first: shots 2-4 copy it, so a wrong hero would spoil all of them"
+                break
             if no != 1 and h is not None and h.image_path and h.status in ("pass", "approved", "unchecked"):
                 try:
                     hero_ref = storage.read(h.image_path)
@@ -322,7 +382,7 @@ def process(pid: int, only: list[int] | None = None):
                            if (spec.get("fill") or {}).get("reviewer_note") else "")}
                 facts = planner.qc_facts(plan) + ("; " + facts if facts else "")
                 prompt = spec["prompt"]
-                call_refs = ([hero_ref] if hero_ref else []) + refs[: (1 if hero_ref else 2)]
+                call_refs = ([hero_ref] if hero_ref else []) + refs[:2]
             card = {} if plan is not None else shot_card(s, p, sh.kind)
             cl = [f"{lbl}: {card[k]}" for k, lbl in (("scene", "Scene"), ("background", "Background / surface"),
                   ("props", "Props (plain, unbranded, real objects)"), ("pose", "Hands / people / pose"),
@@ -348,8 +408,15 @@ def process(pid: int, only: list[int] | None = None):
               spec = {**spec, "prompt": spec["prompt"] + (f"\n\n[BRAND LOOK - light, colours and mood only, copy no "
                                                          f"objects]\n{style_note}" if style_note else "")
                     + LOCK + ((ANCHOR.replace("Keep the same face of the product towards the camera and the same orientation; you may move the camera higher, closer or farther, but do not rotate the product to reveal unseen sides.", "Show the product at the angle of the FIRST image (a real photo of that side).") if used_photo else ANCHOR) if hero_ref else "")}
+            override = (((p.data or {}).get("prompt_override") or {}).get(str(no)) or "").strip()
+            if override:
+                note_txt = ((spec.get("fill") or {}).get("reviewer_note") or "").strip()
+                spec = {**spec, "prompt": override + (f"\n\nREVIEWER ADJUSTMENT (highest priority, never change the "
+                                                      f"product): {note_txt}" if note_txt else "")}
             prompt = spec["prompt"]
-            call_refs = ([hero_ref] if hero_ref else []) + refs[: (1 if hero_ref else 2)]
+            call_refs = ([hero_ref] if hero_ref else []) + refs[:2]
+            sh.prompt = prompt
+            sent = {"photos": sent_rels, "hero": bool(hero_ref), "override": bool(override), "plan": plan is not None}
             result = None
             escalate = (get_setting(s, "escalate_model", "") or "").strip()
             escalated = False
@@ -383,7 +450,8 @@ def process(pid: int, only: list[int] | None = None):
                     result = {"checks": {"product_exact": True}, "reasons": {}, "how": how}
                 else:
                     try:
-                        result = prov.qc(hero_ref or shot_raw, img, {"kind": sh.kind, "no": no, "facts": facts,
+                        qref = _sheet([hero_ref, shot_raw] if hero_ref else [shot_raw] + refs[:2])
+                        result = prov.qc(qref, img, {"kind": sh.kind, "no": no, "facts": facts, "sheet": True,
                                          "vs_hero": bool(hero_ref)}, rv.data)
                         _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
                     except Exception as e:               # keep the image; a person checks it instead
@@ -391,6 +459,7 @@ def process(pid: int, only: list[int] | None = None):
                         result = {"checks": {}, "reasons": {"qc": f"Automatic QC unavailable: {str(e)[:200]}"},
                                   "unchecked": True}
                     result["how"] = how
+                result["sent"] = {**sent, "model": sh.model or model, "size": size}
                 sh.image_path, sh.qc = rel, result
                 s.commit()
                 if result.get("unchecked") or _passed(result, qc_mode):

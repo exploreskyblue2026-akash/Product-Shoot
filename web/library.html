@@ -118,9 +118,9 @@ function render(){
   if(!$("#drive").value&&D.drive_link)$("#drive").value=D.drive_link;
   $("#cut-panel").hidden=!D.cutouts;
   const c=D.counts, rows=D.rows, shoot=rows.filter(r=>r.in_shoot).length;
-  const tabs=[["shoot","Shoot sheet",shoot],["all","All with photos",rows.filter(r=>r.images).length],["ready","Ready",c.ready||0],["check","Check",c.check||0],["cutting","Waiting",c.cutting||0],["needs_photo","Needs photo",(c.needs_photo||0)+(c.not_in_master||0)]];
+  const tabs=[["shoot","Shoot sheet",shoot],["all","All with photos",rows.filter(r=>r.images).length],["ready","Ready",c.ready||0],["check","Check",c.check||0],["cutting","Waiting",c.cutting||0],["needs_photo","Needs photo",(c.needs_photo||0)+(c.not_in_master||0)],["discarded","Has discarded photos",rows.filter(r=>(r.discarded||[]).length).length],["review","Plan needs review",rows.filter(r=>r.plan&&r.plan.json&&r.plan.json.review_needed&&!r.plan.approved).length]];
   $("#stats").innerHTML=tabs.map(([k,l,n])=>`<button type="button" data-f="${k}" aria-pressed="${filter==k}"><b>${n}</b>${l}</button>`).join("")+`<span class="hint" style="align-self:center">${D.products} products in master · ${D.images} images</span>`;
-  const list=rows.filter(r=>filter=="all"?r.images:filter=="shoot"?r.in_shoot:filter=="needs_photo"?["needs_photo","not_in_master"].includes(r.status):r.status==filter).slice(0,300);
+  const list=rows.filter(r=>filter=="all"?r.images:filter=="shoot"?r.in_shoot:filter=="needs_photo"?["needs_photo","not_in_master"].includes(r.status):filter=="discarded"?(r.discarded||[]).length:filter=="review"?(r.plan&&r.plan.json&&r.plan.json.review_needed&&!r.plan.approved):r.status==filter).slice(0,300);
   $("#grid").innerHTML=list.map(card).join("")||'<div class="empty">Nothing here yet.</div>';
   $("#un-n").textContent=D.unmatched.length+" pictures";
   $("#un").innerHTML=D.unmatched.slice(0,120).map(u=>`<div class="card"><div class="pic"><img src="${esc(u.src)}" alt="" loading="lazy"></div><div class="nm" title="${esc(u.name)}">${esc(u.name)}</div>
@@ -147,6 +147,8 @@ function plan(r){const rec=r.plan;
     ${Object.entries(j.shots||{}).map(([k,s])=>`<div class="sh"><b>${SHN[k]||esc(k)}</b>${esc(s.goal||"")} · ${esc(s.scene||"")} on ${esc(s.surface||"")} · ${esc(s.camera||"")} · ${esc(s.composition||"")}<br>Props: ${esc(J(s.props))}${s.hands&&s.hands!="none"?` · Hands: ${esc(s.hands)}`:""}</div>`).join("")}
     <details><summary class="hint">Edit plan (JSON)</summary><textarea data-pj="${esc(r.key)}" spellcheck="false">${esc(JSON.stringify(j,null,1))}</textarea><div class="acts"><button class="btn sm" data-psave="${esc(r.key)}" type="button">Save edits</button></div></details>
     <div class="acts">${rec.approved?`<button class="btn sm" data-papprove="0" data-key="${esc(r.key)}" type="button">Un-approve</button>`:`<button class="btn sm primary" data-papprove="1" data-key="${esc(r.key)}" type="button">✓ Approve plan</button>`}<button class="btn sm" data-plan="${esc(r.key)}" type="button">Re-analyse</button></div></details>`}
+function photos(r){const a=r.all||[];if(!a.length)return "";
+  return `<details class="plan"><summary><b>Photos in this cluster</b><span class="chip mute">${a.length}</span></summary><div class="disc">${a.map(i=>`<figure><a href="${esc(i.src)}" target="_blank" rel="noopener"><img src="${esc(i.src)}" alt="" style="opacity:1"></a><figcaption>${i.primary?"<b>main</b> · ":""}${esc(i.angle||"no angle")}<br>${i.w}×${i.h} · ${esc(i.source)}${i.sharpness!=null?`<br>sharpness ${esc(i.sharpness)}`:""}${i.flags&&i.flags.length?`<br>⚠ ${esc(i.flags.join(", "))}`:""}<br><span title="${esc(i.name)}">${esc((i.name||"").split("/").pop().slice(0,24))}</span></figcaption><button class="btn sm danger" data-act="not_product" data-id="${i.id}" type="button">Not this product</button></figure>`).join("")}</div></details>`}
 function disc(r){const d=r.discarded||[];if(!d.length)return "";
   return `<details class="plan"><summary><b>Discarded photos</b><span class="chip warn">${d.length}</span></summary><div class="disc">${d.map(i=>`<figure><img src="${esc(i.src)}" alt="Discarded photo"><figcaption>${esc((i.discarded||{}).reason||"")}</figcaption><button class="btn sm" data-act="restore" data-id="${i.id}" type="button">Restore</button></figure>`).join("")}</div></details>`}
 const MF=[["summary","Product"],["text","Exact text / logo"],["colours","Colours"],["shape","Shape & proportions"],["parts","Parts & counts"],["material","Material & finish"],["size","Real size"],["must_keep","Must never change"],["watch","Watch out (past mistakes)"]];
@@ -164,6 +166,7 @@ function card(r){const s=ST[r.status]||["mute",r.status], p=r.primary;
   ${r.status=="low_quality"&&p?`<div class="acts"><button class="btn sm" data-act="use_anyway" data-id="${p.id}" type="button">Use anyway</button></div>`:""}
   ${p&&!D.cutouts?kit(r):""}
   ${p&&!D.cutouts?plan(r):""}
+  ${photos(r)}
   ${disc(r)}
   ${p&&!D.cutouts&&!r.plan?mem(r):""}
   ${p&&!D.cutouts?`<div class="acts"><button class="btn sm danger" data-act="not_product" data-id="${p.id}" type="button" title="Move this photo to Discarded">✕ Not this product</button></div>`:""}

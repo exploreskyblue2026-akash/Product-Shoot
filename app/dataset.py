@@ -30,6 +30,7 @@ DEFAULT_SETTINGS = {
     "max_cost_product": 0.30,      # USD hard cap per product (images + checks)
     "daily_budget": 3.0,           # USD per day; autopilot pauses when reached
     "hero_gate": True,             # if the hero fails QC, don't generate the other shots
+    "hero_review": True,           # shots 2-4 wait until a person approves the hero (they copy it)
     "qc_mode": "light",            # light: only shape / label / artefacts can fail a shot; full: all 8 checks
     "usd_inr": 88.0,
     "publish_shopify": False,

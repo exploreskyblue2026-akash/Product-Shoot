@@ -158,13 +158,13 @@ class GeminiProvider:
                  style: bytes | None = None) -> bytes:
         if str(model).startswith("openrouter:"):               # FLUX.2 etc. through OpenRouter
             from . import openrouter
-            imgs = [raw] + list(refs or [])[:2]
+            imgs = [raw] + list(refs or [])[:3]
             lead = ("The first image is the real product. " if len(imgs) == 1 else
                     f"The first {len(imgs)} images all show the SAME real product; reproduce it exactly. ")
             self.last_model = model
             return openrouter.generate(model.split(":", 1)[1], lead + prompt, imgs)
         parts = [types.Part.from_bytes(data=raw, mime_type=_mime(raw))]
-        for extra in (refs or [])[:2]:
+        for extra in (refs or [])[:3]:
             parts.append(types.Part.from_bytes(data=extra, mime_type=_mime(extra)))
         n = len(parts)
         lead = ("The first image above is the real product. " if n == 1 else
@@ -248,6 +248,9 @@ class GeminiProvider:
             "attention_70_30: product is the clear focal point. props_ok: at most 5 props, none branded, realistic scale. "
             "no_artifacts: no extra text, watermark, warped hands or geometry. margin_ok: product not cropped, clear margin."
         )
+        if shot.get("sheet"):
+            prompt += ("\nNOTE: image 1 is a SHEET of reference photos of the real product placed side by side (several views); "
+                       "the product in image 2 must match the product shown in that sheet.")
         if shot.get("vs_hero"):
             prompt += ("\nIMPORTANT: image 1 is our APPROVED HERO shot of this exact product. The product in image 2 must be "
                        "the identical product: same design, pattern and print placement, colours, logo and text. Any "

@@ -21,6 +21,7 @@ def client():
     r = c.post("/api/login", json={"email": "owner@test.com", "password": "pw-for-tests"})
     assert r.status_code == 200, r.text
     c.post("/api/autopilot", json={"pipeline_mode": "v1"})   # legacy 'add input' flow; shoot-sheet tests switch to v2
+    c.put("/api/admin/settings", json={"hero_review": False})   # older tests generate all shots in one go
     return c
 
 
@@ -904,3 +905,39 @@ def test_planner_verifies_photos_plans_shots_and_gates_review():
     assert c.put(f"/api/library/products/{row['key']}/plan", json={"approved": True}).json()["released"] == 1
     assert c.get(f"/api/products/{pid}").json()["stage"] == "queue"
     assert c.put(f"/api/library/products/{row['key']}/plan", json={"json_text": "{bad"}).status_code == 400
+
+
+def test_inspector_trace_prompt_override_and_hero_gate():
+    from app.providers import mock
+    c = client()
+    c.put("/api/admin/settings", json={"hero_review": True, "default_shots": [1, 2, 3, 4], "max_cost_product": 5,
+                                       "daily_budget": 100, "hero_gate": False, "qc_mode": "light", "retries": 0,
+                                       "model_hero": "", "escalate_model": ""})
+    c.post("/api/autopilot", json={"autopilot": False})
+    c.post("/api/sources/upload", files=[("files", ("INSP-1_front.jpg", (SAMPLES / "WAT-HEM-SSGT_front.png").read_bytes(), "image/jpeg"))])
+    pid = {x["code"]: x["id"] for x in c.get("/api/state").json()["queue"]}["INSP-1"]
+    seen = []
+    og = mock.MockProvider.generate
+    def g(self, prompt, raw, model, size="1K", refs=None, style=None):
+        seen.append(prompt); return og(self, prompt, raw, model, size, refs, style)
+    mock.MockProvider.generate = g
+    try:
+        c.post(f"/api/products/{pid}/run"); pipeline.tick()
+        j = c.get(f"/api/products/{pid}").json()
+        assert len(seen) == 1 and "Approve the hero first" in j["error"]           # 2-4 wait for a person
+        hero = j["shots"][0]
+        assert hero["prompt"] and hero["sent"] and "trace" in j
+        # your own prompt for the hero is used verbatim on regenerate
+        assert c.put(f"/api/products/{pid}/prompt/1", json={"prompt": "MY OWN HERO PROMPT"}).json()["ok"]
+        c.post(f"/api/products/{pid}/regenerate", json={"shot": 1, "note": "warmer"}); pipeline.tick()
+        assert seen[-1].startswith("MY OWN HERO PROMPT") and "warmer" in seen[-1]
+        j = c.get(f"/api/products/{pid}").json()
+        assert j["shots"][0]["override"] == "MY OWN HERO PROMPT" and j["shots"][0]["prompt"].startswith("MY OWN")
+        c.put(f"/api/products/{pid}/prompt/1", json={"prompt": ""})
+        assert c.get(f"/api/products/{pid}").json()["shots"][0]["override"] == ""
+        c.post(f"/api/products/{pid}/approve", json={}); pipeline.tick()
+        j = c.get(f"/api/products/{pid}").json()
+        assert all(s["image"] for s in j["shots"]) and all(s["sent_hero"] for s in j["shots"][1:])
+    finally:
+        mock.MockProvider.generate = og
+        c.put("/api/admin/settings", json={"hero_review": False})
