@@ -847,6 +847,12 @@ def _bg(name: str, fn):
 def _auto_prepare(s, r):
     """After new files or a code sheet: prepare waiting codes straight away (website first, analysis, ready)."""
     from . import libqueue
+    try:                                                # unmatched photos: ladder + brand-website bridge, every time
+        rm = library.rematch_unmatched(s, grow=True)
+        if rm["matched"]:
+            r = f"{r} · {rm['matched']} unmatched photo(s) filed"
+    except Exception as e:
+        print(f"[library] re-match failed: {e}")
     waiting = [it for it in (get_setting(s, "shoot_list", []) or []) if (it.get("prep") or {}).get("state", "waiting")
                in ("waiting", "needs_photo")]
     if waiting and get_setting(s, "auto_prepare", True):

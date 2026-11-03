@@ -321,14 +321,17 @@ def add_image(s: Session, data: bytes, name: str, source: str = "file", key: str
         return None
     idx = idx if idx is not None else _index(s)
     sugg = []
+    web_note = ""
     if key is None:
         p, how, sugg = match_name(name, idx)
+        if not p and not sugg and get_setting(s, "use_websites", True):
+            p, how, web_note = match_via_website(s, name, idx, grow=False)
         key = p.key if p else ""
     elif key and not how:
         how = {"catalogue": "catalogue page caption", "website": "official website", "kit": "AI view (approved by you)"}.get(source, "assigned")
     h = dhash(im)
     q = photo_quality(im, s)
-    q = {**q, "match": how if key else "", **({"suggest": sugg} if sugg else {})}
+    q = {**q, "match": how if key else "", **({"suggest": sugg} if sugg else {}), **({"web_note": web_note} if web_note else {})}
     rel = storage.save(f"library/raw/{storage.safe(key or 'unmatched')}/{storage.safe(name)[-120:]}",
                        storage.normalise_raw(data))
     img = LibImage(key=key, source=source, src_name=name[:300], drive_id=drive_id, path=rel,
@@ -827,7 +830,7 @@ def _img(i: LibImage) -> dict:
             "flags": (i.meta or {}).get("flags", []), "sharpness": (i.meta or {}).get("sharpness"),
             "kit": (i.meta or {}).get("kit", ""), "discarded": (i.meta or {}).get("discarded"),
             "match": (i.meta or {}).get("match", ""), "suggest": (i.meta or {}).get("suggest", []),
-            "web": (i.meta or {}).get("web_url", "")}
+            "web": (i.meta or {}).get("web_url", ""), "web_note": (i.meta or {}).get("web_note", "")}
 
 
 def report_csv(s: Session) -> str:
@@ -904,13 +907,77 @@ def recheck_matches(s: Session) -> dict:
     return {"moved": moved, "products": len(touched)}
 
 
-def rematch_unmatched(s: Session) -> dict:
-    """Run the matching ladder again over every unmatched photo (after a new sheet or a smarter ladder)."""
+def _brands_for_path(s: Session, name: str) -> list[str]:
+    """Brands whose name / detect words appear in the file's folder path (e.g. 'Milan Raw Data'); else every brand."""
+    from .brands import brand_rows
+    low = (name or "").lower()
+    hits, all_ = [], []
+    for k, r in brand_rows(s).items():
+        if k.startswith("_"):
+            continue
+        d = r.data or {}
+        all_.append(k)
+        words = [w.strip().lower() for w in str(d.get("detect_keywords", "")).split("|") if w.strip()]
+        words += [str(d.get("brand_name") or k).lower()]
+        if any(w and re.search(rf"(^|[^a-z]){re.escape(w)}([^a-z]|$)", low) for w in words):
+            hits.append(k)
+    return hits or all_
+
+
+def _path_names_brand(s: Session, name: str) -> bool:
+    from .brands import brand_rows
+    return len(_brands_for_path(s, name)) < len([k for k in brand_rows(s) if not k.startswith("_")])
+
+
+def match_via_website(s: Session, name: str, idx: dict, grow: bool = False) -> tuple[LibProduct | None, str, str]:
+    """A file named with the BRAND's own reference (e.g. Milan '16529004_07.jpg'): find that reference on the brand's
+    official site (index), read the EAN printed on that page, and match the EAN to the master sheet.
+    Returns (product, how, note)."""
+    stem = re.sub(r"\.[a-z0-9]{3,4}$", "", name.split("/")[-1], flags=re.I)
+    toks = [norm(x) for x in re.split(r"[^A-Za-z0-9]+", stem) if len(x) >= 5 and any(ch.isdigit() for ch in x)]
+    if not toks:
+        return None, "", ""
+    note = ""
+    grow = grow and _path_names_brand(s, name)          # only read a site when the folder tells us the brand
+    for bkey in _brands_for_path(s, name):
+        for attempt in range(40 if grow else 1):
+            wi = get_setting(s, f"webindex:{bkey}", {}) or {}
+            for u, f in (wi.get("pages") or {}).items():
+                refs = set(f.get("r") or [])
+                if not any(t in refs for t in toks):
+                    continue
+                for e in f.get("e") or []:
+                    p = idx.get(norm(e))
+                    if p:
+                        return p, f"brand website: ref {toks[0]} → EAN {e}", ""
+                note = f"On the {bkey} website as ref {toks[0]}, but its EAN {', '.join(f.get('e') or ['(none)'])} is not in your master sheet"
+                return None, "", note
+            urls = wi.get("urls") or []
+            if not grow or (urls and wi.get("done", 0) >= len(urls)):
+                break
+            before = (len(urls), wi.get("done", 0))
+            try:
+                r = web_index(s, bkey, budget=150)
+            except Exception:
+                break
+            if (r["pages"], r["indexed"]) == before or not r["pages"]:
+                break
+    return None, "", note
+
+
+def rematch_unmatched(s: Session, grow: bool = True) -> dict:
+    """Run the matching ladder again over every unmatched photo (after a new sheet or a smarter ladder), including
+    the brand-website bridge (brand reference -> official page -> EAN -> master sheet)."""
     idx = _index(s)
     matched = suggested = 0
+    use_web = get_setting(s, "use_websites", True)
     for img in s.scalars(select(LibImage).where(LibImage.key == "", LibImage.source.in_(("drive", "file")),
                                                 LibImage.dup_of.is_(None))):
         p, how, sugg = match_name(img.src_name or img.path, idx)
+        if not p and use_web:
+            p, how, note = match_via_website(s, img.src_name or img.path, idx, grow=grow)
+            if note:
+                img.meta = {**(img.meta or {}), "web_note": note}
         if p:
             img.key, img.meta = p.key, {**(img.meta or {}), "match": how}
             pick_primary(s, p.key)

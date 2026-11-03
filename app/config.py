@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.2.0 (Library queue: codes from any brand -> website first + raw photos -> analysis -> Studio; set design + self-check)"
+APP_VERSION = "4.3.0 (unmatched photos auto-filed via brand website: brand ref -> page EAN -> master sheet)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

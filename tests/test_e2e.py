@@ -1117,3 +1117,33 @@ def test_library_queue_codes_any_brand_website_first_then_studio():
         assert s.scalar(select(LibProduct).where(LibProduct.key == "NEWPEN77")).brand
         queued = {(p.data or {}).get("lib_key") for p in s.scalars(select(Product))}
         assert {"KR1805BR", "NEWPEN77"} <= queued
+
+
+def test_brand_reference_photo_filed_via_website_ean():
+    import io
+    from PIL import Image, ImageDraw
+    from app.db import SessionLocal, LibImage, set_setting
+    from sqlalchemy import select
+    c = client()
+    c.post("/api/library/clear")
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (Path(__file__).parent / "library" / "master.xlsx").read_bytes(), "x/y"))])
+    wait_job(c)
+    with SessionLocal() as s:     # Troika site index: brand ref BX99123 is printed on a page together with KR18/05/BR's EAN
+        set_setting(s, "webindex:troika", {"urls": ["https://t.example/a", "https://t.example/b"], "done": 2,
+                                           "pages": {"https://t.example/a": {"r": ["BX99123"], "e": ["4024023270109"]},
+                                                     "https://t.example/b": {"r": ["ZZ55501"], "e": ["9999999999999"]}}})
+        s.commit()
+    c.put("/api/admin/settings", json={"use_websites": True})
+    im = Image.new("RGB", (1200, 1200), (250, 250, 250)); ImageDraw.Draw(im).rectangle([300, 300, 900, 900], fill=(30, 30, 30))
+    b = io.BytesIO(); im.save(b, "JPEG")
+    try:
+        c.post("/api/library/upload", files=[("files", ("Troika Raw Data/BX99123_01.jpg", b.getvalue(), "image/jpeg")),
+                                             ("files", ("Troika Raw Data/ZZ55501_02.jpg", b.getvalue()[:-2] + b"\xff\xd9", "image/jpeg"))])
+        wait_job(c)
+    finally:
+        c.put("/api/admin/settings", json={"use_websites": False})
+    with SessionLocal() as s:
+        a = s.scalar(select(LibImage).where(LibImage.src_name.like("%BX99123%")))
+        z = s.scalar(select(LibImage).where(LibImage.src_name.like("%ZZ55501%")))
+        assert a.key == "KR1805BR" and "EAN 4024023270109" in a.meta["match"]
+        assert z is None or (z.key == "" and "not in your master sheet" in (z.meta or {}).get("web_note", ""))
