@@ -80,13 +80,18 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
       <label class="field">Google Drive folder or Shared drive link<input id="drive" placeholder="https://drive.google.com/drive/folders/…"></label>
       <button class="btn primary" id="scan" type="button">Scan Drive</button>
     </div>
+    <div class="row" style="margin-top:10px">
+      <label class="field">Company master sheet (Google Sheets link · re-read automatically when it changes)<input id="mlink" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
+      <button class="btn" id="msync" type="button">Connect &amp; sync</button>
+    </div>
+    <p class="hint" id="mstat" style="margin:4px 0 0"></p>
     <div class="acts" style="margin-top:10px"><button class="btn sm" id="web-all" type="button" title="For every shoot-sheet / brand-queue product: find its page on the brand's official site by EAN or reference, verify it, add its photos">Fetch official photos for queued products</button></div>
     <div class="drop" id="drop" tabindex="0" role="button" style="margin-top:12px">Drop files here or click to choose<input type="file" id="files" multiple hidden accept=".jpg,.jpeg,.png,.webp,.zip,.pdf,.xlsx,.xlsm"></div>
   </section>
 
   <section class="panel" aria-labelledby="h-lq">
     <div class="panel-h"><h2 id="h-lq">Library queue · product codes to prepare</h2><span class="hint" id="lq-n"></span></div>
-    <p class="hint" style="margin-top:0">Paste codes from any brands (no brand needed), or drop a sheet with a <b>Code</b> column. Each code is found in the master sheet (or on the brand websites), gets its <b>official website photos first</b> plus any raw photos of that code, is analysed, and is then ready for the Studio.</p>
+    <p class="hint" style="margin-top:0">Paste codes from any brands (no brand needed), or drop a sheet with a <b>Code</b> column. Each code is found in the master sheet (or on the brand websites), gets its photos from <b>your SkyBlue store first</b>, then the <b>brand's official website</b>, plus any raw photos of that code, is analysed, and is then ready for the Studio.</p>
     <div class="row" style="align-items:flex-start;gap:12px">
       <label class="field" style="flex:1 1 320px">Product codes (one per line)<textarea id="codes" rows="4" placeholder="081264FRS&#10;BBG64/GY&#10;8411574089070"></textarea></label>
       <div style="display:flex;flex-direction:column;gap:8px;flex:0 1 300px">
@@ -96,7 +101,7 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
         <div class="acts"><button class="btn sm" id="lq-prep" type="button">Prepare now</button><button class="btn sm" id="lq-sendnow" type="button">Send ready to Studio</button></div>
       </div>
     </div>
-    <div class="tw" style="overflow-x:auto;margin-top:10px"><table class="lq"><thead><tr><th>Code</th><th>Brand</th><th>Found by</th><th>Official website</th><th>Photos</th><th>State</th><th></th></tr></thead><tbody id="lq"></tbody></table></div>
+    <div class="tw" style="overflow-x:auto;margin-top:10px"><table class="lq"><thead><tr><th>Code</th><th>Brand</th><th>Found by</th><th>SkyBlue store</th><th>Brand website</th><th>Photos</th><th>State</th><th></th></tr></thead><tbody id="lq"></tbody></table></div>
   </section>
 
   <section class="panel" aria-labelledby="h-clu">
@@ -147,8 +152,10 @@ function render(){
   $("#grid").innerHTML=list.map(card).join("")||'<div class="empty">Nothing here yet.</div>';
   {const LQ={waiting:["mute","Waiting"],ready:["ok","Ready for Studio"],sent:["info","In the Studio queue"],needs_photo:["warn","Needs a photo"],review:["warn","Plan needs your approval"],not_found:["bad","Not found"],error:["bad","Error"]};
    const q=D.lqueue||[];$("#lq-n").textContent=q.length?`${q.length} codes · ${q.filter(x=>(x.prep||{}).state=="ready").length} ready · ${q.filter(x=>(x.prep||{}).state=="sent").length} in Studio`:"";
+   if(document.activeElement!==$("#mlink"))$("#mlink").value=D.master_link||"";
+   $("#mstat").textContent=D.master_link?`Connected${D.master_synced?" · last read "+D.master_synced.replace("T"," "):""} · only codes, EAN, names, short name and HSN are stored; costs, prices and stock are never kept.`:"Not connected: you can also drop the .xlsx above.";
    $("#lq-auto").checked=!!D.auto_prepare;$("#lq-send").checked=!!D.auto_send_studio;
-   $("#lq").innerHTML=q.map(x=>{const p=x.prep||{},st=LQ[p.state||"waiting"]||["mute",p.state];return `<tr><td class="mono">${esc(x.code)}</td><td>${esc(p.brand||"")}</td><td>${esc(x.match=="exact"?"master sheet":(x.match||"").replace(/^close match/,"master sheet, close match"))}</td><td>${esc(p.web||"")}</td><td>${p.photos!=null?`${p.photos} (${p.website_photos||0} official)`:""}</td><td><span class="chip ${st[0]}">${st[1]}</span>${p.why?`<div class="hint">${esc(p.why)}</div>`:""}</td><td>${["needs_photo","not_found","error","review"].includes(p.state)?`<button class="btn sm" data-retry="${esc(x.code)}" type="button">Retry</button>`:""}</td></tr>`}).join("")||'<tr><td colspan="7" class="hint">No codes yet.</td></tr>'}
+   $("#lq").innerHTML=q.map(x=>{const p=x.prep||{},st=LQ[p.state||"waiting"]||["mute",p.state];return `<tr><td class="mono">${esc(x.code)}</td><td>${esc(p.brand||"")}</td><td>${esc(x.match=="exact"?"master sheet":(x.match||"").replace(/^close match/,"master sheet, close match"))}</td><td>${esc(p.store||"")}</td><td>${esc(p.web||"")}</td><td>${p.photos!=null?`${p.photos} (${p.store_photos||0} store · ${p.website_photos||0} brand site)`:""}</td><td><span class="chip ${st[0]}">${st[1]}</span>${p.why?`<div class="hint">${esc(p.why)}</div>`:""}</td><td>${["needs_photo","not_found","error","review"].includes(p.state)?`<button class="btn sm" data-retry="${esc(x.code)}" type="button">Retry</button>`:""}</td></tr>`}).join("")||'<tr><td colspan="8" class="hint">No codes yet.</td></tr>'}
   $("#un-n").textContent=D.unmatched.length+" pictures";
   {const by={};rows.forEach(r=>(r.all||[]).forEach(i=>{const m=(i.match||"code in file name").replace(/article number .*/,"article number + colour").replace(/official website.*/,"official website");by[m]=(by[m]||0)+1}));
    const disc=rows.reduce((n,r)=>n+(r.discarded||[]).length,0),sug=D.unmatched.filter(u=>u.suggest&&u.suggest.length).length;
@@ -220,6 +227,7 @@ document.addEventListener("click",async e=>{
   const g=e.target.closest("[data-assign]"); if(g){const code=document.querySelector(`[data-code="${g.dataset.assign}"]`).value.trim(); if(!code)return toast("Type a product code");
     try{await api(`/api/library/images/${g.dataset.assign}`,{method:"POST",body:{action:"assign",code}});toast("Assigned to "+code);await load();kick()}catch(x){toast(x.message)}}
 });
+$("#msync").onclick=async()=>{const v=$("#mlink").value.trim();if(!v)return toast("Paste the Google Sheets link");try{await api("/api/library/master-link",{method:"POST",body:{link:v}});toast("Reading the master sheet…");poll()}catch(x){toast(x.message)}};
 $("#codes-add").onclick=async()=>{const v=$("#codes").value.trim();if(!v)return toast("Paste at least one code");try{await api("/api/library/codes",{method:"POST",body:{text:v}});$("#codes").value="";toast("Codes added, preparing…");poll()}catch(x){toast(x.message)}};
 $("#lq-prep").onclick=async()=>{try{await api("/api/library/prepare",{method:"POST"});toast("Preparing the Library queue…");poll()}catch(x){toast(x.message)}};
 $("#lq-sendnow").onclick=async()=>{try{const r=await api("/api/library/send",{method:"POST",body:{}});toast(`${r.sent} product(s) sent to the Studio queue`);await load()}catch(x){toast(x.message)}};

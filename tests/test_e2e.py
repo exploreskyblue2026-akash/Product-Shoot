@@ -513,7 +513,7 @@ def test_product_memory_quality_gate_and_learning():
     # study + edit + approve memory
     assert c.post("/api/library/study-shoot").status_code == 200
     st = wait_job(c)
-    bl = {r["code"]: r for r in st["rows"]}["PIP25/BL"]
+    bl = next(r for r in st["rows"] if r["code"] == "PIP25/BL" and r["in_shoot"] and r["images"])
     assert bl["memory"]["facts"]["summary"] and bl["primary"]["angle"] == "front"
     m = c.put(f"/api/library/products/{bl['key']}/memory", json={"facts": {"text": ["TROIKA", "LILIPUT"]}, "approved": True}).json()
     assert m["memory"]["approved"] and m["memory"]["facts"]["text"] == ["TROIKA", "LILIPUT"]
@@ -1147,3 +1147,61 @@ def test_brand_reference_photo_filed_via_website_ean():
         z = s.scalar(select(LibImage).where(LibImage.src_name.like("%ZZ55501%")))
         assert a.key == "KR1805BR" and "EAN 4024023270109" in a.meta["match"]
         assert z is None or (z.key == "" and "not in your master sheet" in (z.meta or {}).get("web_note", ""))
+
+
+def test_store_first_then_brand_site_and_master_sheet_columns():
+    import io, openpyxl
+    from PIL import Image, ImageDraw
+    from app.connectors import shopify, website
+    from app.db import SessionLocal, LibProduct, LibImage
+    from sqlalchemy import select
+    c = client()
+    c.post("/api/library/clear")
+    # company sheet layout: Item Code, Item Name, Product ID, Short Name, HSN Code, GST Tax Perc, E-code, costs, stock
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "MILAN"
+    ws.append(["Item Code", "Item Name", "Product ID", "Short Name", "HSN Code", "GST Tax Perc", "E-code", "Landing Cost", "Selling Cost", "Stock"])
+    ws.append([77001, "MILAN PENCIL CASE GREEN - 081264FRS", "081264FRS", "PENCIL CASE", 4202, "GST 18%", 8411574089070, 500.5, 999, 12])
+    b = io.BytesIO(); wb.save(b)
+    c.post("/api/library/upload", files=[("files", ("company.xlsx", b.getvalue(), "x/y"))])
+    wait_job(c)
+    with SessionLocal() as s:
+        lp = s.scalar(select(LibProduct).where(LibProduct.key == "081264FRS"))
+        assert lp.item_code == "77001" and lp.ean == "8411574089070"
+        assert "prices" not in (lp.data or {}) and "500.5" not in str(lp.data) and "999" not in str(lp.data)
+    def pic(col):
+        im = Image.new("RGB", (1600, 1600), (250, 250, 250)); ImageDraw.Draw(im).rectangle([400, 400, 1200, 1200], fill=col)
+        o = io.BytesIO(); im.save(o, "JPEG"); return o.getvalue()
+    seen = {}
+    oc, osp, od = shopify.configured, shopify.store_product, website.download
+    def fake_store(barcode="", skus=None):
+        seen["q"] = (barcode, skus)
+        return {"id": "gid://shopify/Product/9", "title": "Pencil case", "description": "<p>Green</p>", "url": "",
+                "images": ["https://cdn.shop/081264frs_1.jpg"], "matched_by": "barcode", "media": []}
+    shopify.configured, shopify.store_product = (lambda: True), fake_store
+    website.download = lambda u: pic((20, 160, 60))
+    c.put("/api/admin/settings", json={"use_websites": True, "use_shopify": True, "planner_on": True, "plan_review": "never"})
+    try:
+        c.post("/api/library/codes", json={"text": "77001", "replace": True})    # the SkyBlue item code works too
+        wait_job(c, 60)
+        assert c.post("/api/library/prepare").status_code == 200
+        wait_job(c, 60)
+    finally:
+        shopify.configured, shopify.store_product, website.download = oc, osp, od
+        c.put("/api/admin/settings", json={"use_websites": False})
+    q = {i["code"]: i for i in c.get("/api/library").json()["lqueue"]}
+    prep = q["77001"]["prep"]
+    assert q["77001"]["key"] == "081264FRS" and prep["state"] == "ready", prep
+    assert prep["store_photos"] == 1 and "not needed" in prep["web"] and seen["q"][0] == "8411574089070"
+    with SessionLocal() as s:
+        prim = s.scalar(select(LibImage).where(LibImage.key == "081264FRS", LibImage.primary == True))  # noqa: E712
+        assert prim.source == "store"
+    # images this tool pushed earlier are never used as the real-product reference
+    oc2 = shopify._call
+    shopify._call = lambda q, v=None: {"productVariants": {"nodes": [{"id": "v", "sku": "", "barcode": "", "product": {
+        "id": "p", "title": "t", "handle": "h", "descriptionHtml": "", "onlineStoreUrl": "", "media": {"nodes": [
+            {"id": "m1", "alt": "X | Hero", "image": {"url": "https://cdn/ai.jpg", "width": 1, "height": 1}},
+            {"id": "m2", "alt": "real", "image": {"url": "https://cdn/real.jpg", "width": 1, "height": 1}}]}}}]}}
+    try:
+        assert shopify.store_product("123")["images"] == ["https://cdn/real.jpg"]
+    finally:
+        shopify._call = oc2

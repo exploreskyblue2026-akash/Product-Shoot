@@ -34,7 +34,7 @@ def norm(code) -> str:
 ALIASES = {
     "product_id": ("product id", "productid", "reference", "model", "article", "art no", "sku code"),
     "item_code": ("item code", "itemcode", "item no", "code"),
-    "ean": ("eancode", "ean code", "ean", "barcode", "gtin"),
+    "ean": ("eancode", "ean code", "ean", "e-code", "e code", "ecode", "ean no", "ean number", "barcode", "gtin"),
     "name": ("item name", "product name", "name", "title"),
     "category": ("short name", "category", "type"),
 }
@@ -105,13 +105,13 @@ def import_master(s: Session, data: bytes, filename: str = "master.xlsx") -> dic
                     continue
                 if "sku" in hl:
                     extra.setdefault("skus", []).append(str(v).strip())
-                elif hl in ("mrp", "selling cost", "price", "new mrp", "new sp", "maximum-retail-price"):
-                    extra.setdefault("prices", {})[hl] = v
+                elif any(w in hl for w in ("cost", "price", "mrp", "stock", "gst", "tax", "margin", "qty", "new sp")):
+                    continue                                # commercial data is never stored by the tool
                 elif hl in ("seo optimised title", "seo optimized title", "product name on amazon"):
                     extra.setdefault("titles", {})[hl] = str(v).strip()
                 elif hl in ("hsn code",):
                     extra["hsn"] = str(v)
-            p.data = {**(p.data or {}), **extra}
+            p.data = {**{k: v for k, v in (p.data or {}).items() if k != "prices"}, **extra}
             name = str(_cell(r, m.get("name"))).strip()[:300]
             cat = str(_cell(r, m.get("category"))).strip()[:80]
             p.name = name or p.name or ""                   # a bare list of codes (e.g. 'Sheet2') never blanks real data
@@ -328,7 +328,8 @@ def add_image(s: Session, data: bytes, name: str, source: str = "file", key: str
             p, how, web_note = match_via_website(s, name, idx, grow=False)
         key = p.key if p else ""
     elif key and not how:
-        how = {"catalogue": "catalogue page caption", "website": "official website", "kit": "AI view (approved by you)"}.get(source, "assigned")
+        how = {"catalogue": "catalogue page caption", "website": "official website", "store": "SkyBlue store",
+               "kit": "AI view (approved by you)"}.get(source, "assigned")
     h = dhash(im)
     q = photo_quality(im, s)
     q = {**q, "match": how if key else "", **({"suggest": sugg} if sugg else {}), **({"web_note": web_note} if web_note else {})}
@@ -368,7 +369,8 @@ def pick_primary(s: Session, key: str, force_id: int | None = None):
         usable = [i for i in imgs if i.cut_status != "skip" and i.source != "kit"] or [i for i in imgs if i.source != "kit"] or imgs
         usable = [i for i in usable if not (i.meta or {}).get("discarded")] or usable
         good = [i for i in usable if not (i.meta or {}).get("flags")] or usable
-        web = [i for i in good if i.source == "website"]            # official website photos always come first
+        web = ([i for i in good if i.source == "store"] or            # 1 our own store, 2 the brand's official site
+               [i for i in good if i.source == "website"])
         pool = web or good
         best = cur if (cur and cur.cut_status in ("ok", "check") and not web) else max(
             pool, key=lambda i: (i.w * i.h) * (2 if (i.meta or {}).get("angle") == "front" else 1)
@@ -689,7 +691,7 @@ def refs_with_angles(s: Session, key: str, limit: int = 4) -> list[dict]:
             if (i.meta or {}).get("kit") in (None, "approved") and not (i.meta or {}).get("discarded")]
     if any(i.source not in ("catalogue", "kit") for i in live):   # real photos of this exact code exist:
         live = [i for i in live if i.source != "catalogue"]         # never mix in catalogue pictures
-    live.sort(key=lambda i: (i.source != "website", not i.primary, i.source == "kit", bool((i.meta or {}).get("flags")),
+    live.sort(key=lambda i: ({"store": 0, "website": 1}.get(i.source, 2), not i.primary, i.source == "kit", bool((i.meta or {}).get("flags")),
                              -(i.w * i.h)))
     from .connectors.mirror import restore
     live = [i for i in live if restore(i.path)]          # photo lost in a redeploy and not in Drive: skip it
@@ -1099,3 +1101,62 @@ def reset_brand(s: Session, brand_key: str) -> dict:
     log(s, "library", f"Brand reset {brand_key}: {removed} photos, {dropped} queue items removed; master rows kept")
     s.commit()
     return {"photos": removed, "queue_items": dropped, "products_kept": len(keys)}
+
+
+
+def store_fetch(s: Session, key: str) -> dict:
+    """Our own SkyBlue store first: the product's live images become source photos (source 'store')."""
+    from .connectors import shopify, website
+    lp = s.scalar(select(LibProduct).where(LibProduct.key == key))
+    if lp is None:
+        raise ValueError("Unknown product")
+    skus = [c for c in list((lp.data or {}).get("skus") or []) + [lp.product_id, lp.item_code] if c]
+    hit = shopify.store_product(lp.ean or "", skus)
+    if not hit:
+        raise ValueError("Not on the SkyBlue store (no product with this barcode / SKU)")
+    have = {(i.meta or {}).get("web_url") for i in s.scalars(select(LibImage).where(LibImage.key == key))}
+    added = 0
+    for u in hit["images"]:
+        if u in have:
+            continue
+        try:
+            data = website.download(u)
+        except Exception:
+            continue
+        img = add_image(s, data, f"store/{u.split('/')[-1].split('?')[0]}", "store", key=key,
+                        how=f"SkyBlue store ({hit['matched_by']})")
+        if img is not None:
+            img.meta = {**(img.meta or {}), "web_url": u}
+            added += 1
+    lp.data = {**(lp.data or {}), "store": {k: hit[k] for k in ("id", "title", "url", "matched_by")},
+               "store_description": re.sub(r"<[^>]+>", " ", hit.get("description") or "")[:1500]}
+    log(s, "library", f"{lp.product_id or key}: {added} photo(s) from the SkyBlue store ({hit['matched_by']})")
+    s.commit()
+    return {"added": added, "matched_by": hit["matched_by"], "images": len(hit["images"])}
+
+
+def sync_master_link(s: Session, link: str | None = None, force: bool = False) -> str:
+    """The company master sheet connected by its Google Sheets (or Drive .xlsx) link: re-read when it changes.
+    Only identifying columns are stored (codes, EAN, name, short name, HSN, SKUs); cost / price / stock never are."""
+    from .connectors import google
+    link = (link or get_setting(s, "master_sheet_link", "") or "").strip()
+    if not link:
+        raise ValueError("No master sheet link set")
+    fid = google.sheet_id(link) if "/spreadsheets/" in link else google.folder_id(link.replace("/file/d/", "/folders/"))
+    meta = google.drive().files().get(fileId=fid, fields="id,name,mimeType,modifiedTime,md5Checksum",
+                                      supportsAllDrives=True).execute()
+    ver = meta.get("md5Checksum") or meta.get("modifiedTime") or ""
+    if not force and ver and ver == get_setting(s, "master_sheet_version", ""):
+        return f"{meta['name']}: unchanged"
+    if meta["mimeType"] == "application/vnd.google-apps.spreadsheet":
+        data = google.drive().files().export(fileId=fid, mimeType=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).execute()
+    else:
+        data = google.download(fid)
+    r = import_master(s, data, meta["name"])
+    set_setting(s, "master_sheet_link", link)
+    set_setting(s, "master_sheet_version", ver)
+    from datetime import datetime as _dt, timezone as _tz
+    set_setting(s, "master_sheet_synced", _dt.now(_tz.utc).isoformat(timespec="minutes"))
+    s.commit()
+    return f"{meta['name']}: {r['added']} new, {r['updated']} updated products"

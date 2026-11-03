@@ -89,7 +89,7 @@ def _create_from_web(s: Session, code: str, bkey: str, facts: dict, b: dict) -> 
                         data={"created_from": "official website", "web": {k: facts.get(k) for k in
                               ("url", "title", "description", "dimensions", "verified_by")}})
         s.add(lp)
-        s.flush()
+        s.commit()                                      # keep it even if a later step fails
     return lp
 
 
@@ -131,9 +131,30 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
         lp = s.scalar(select(LibProduct).where(LibProduct.key == it["key"]))
         bkey, b = _brand_of(s, lp)
         prep["brand"] = b.get("brand_name") or lp.brand or bkey
-        # 2 photos: official website first, plus every raw photo of this code
+        # 2 photos: 1 our own SkyBlue store, 2 the brand's official website, plus every raw photo of this code
+        has_store = s.scalar(select(LibImage.id).where(LibImage.key == it["key"], LibImage.source == "store")) is not None
+        from .connectors import shopify as _shop
+        if not has_store and get_setting(s, "use_shopify", True) and get_setting(s, "store_first", True) and _shop.configured():
+            from .library import store_fetch
+            s.commit()
+            try:
+                r = store_fetch(s, it["key"])
+                prep["store"] = f"found ({r['matched_by']}) · {r['added']} photo(s)"
+                has_store = r["added"] > 0 or has_store
+            except ValueError as e:
+                prep["store"] = str(e)[:120]
+            except Exception as e:
+                s.rollback()
+                prep["store"] = f"store check failed: {str(e)[:100]}"
+        elif not has_store and not _shop.configured():
+            prep["store"] = "store not connected"
+        elif has_store:
+            prep.setdefault("store", "found earlier")
         has_web = s.scalar(select(LibImage.id).where(LibImage.key == it["key"], LibImage.source == "website")) is not None
-        if use_web and b.get("website") and not has_web:
+        if has_store and not has_web:
+            prep["web"] = "not needed: photos from the SkyBlue store"
+        elif use_web and b.get("website") and not has_web:
+            s.commit()
             try:
                 r = web_fetch(s, it["key"])
                 prep["web"] = f"found · {r['added']} photo(s) · verified by {r['verified_by']}"
@@ -149,6 +170,7 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
         photos = [i for i in photos if not (i.meta or {}).get("discarded")]
         prep["photos"] = len(photos)
         prep["website_photos"] = sum(1 for i in photos if i.source == "website")
+        prep["store_photos"] = sum(1 for i in photos if i.source == "store")
         if not photos:
             prep.update(state="needs_photo", why="No photo on the website or in Raw input for this code")
             it["prep"] = prep

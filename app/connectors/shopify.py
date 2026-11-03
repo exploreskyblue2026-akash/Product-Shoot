@@ -1,5 +1,7 @@
 """Shopify Admin GraphQL: attach approved shots to the matching store product (by barcode, then SKU); create a DRAFT
 product from the master sheet only when nothing matches."""
+import re
+
 import httpx
 
 from ..config import SHOPIFY_STORE, SHOPIFY_API_VERSION
@@ -33,6 +35,11 @@ def _token(store: str) -> str:
     j = r.json()
     _tok.update(token=j["access_token"], store=store, exp=time.time() + int(j.get("expires_in", 86399)))
     return _tok["token"]
+
+
+def configured() -> bool:
+    from ..secrets import get_secret as _g
+    return bool(_store() and (_g("SHOPIFY_ADMIN_TOKEN") or (_g("SHOPIFY_CLIENT_ID") and _g("SHOPIFY_CLIENT_SECRET"))))
 
 
 def _call(query: str, variables: dict | None = None) -> dict:
@@ -150,7 +157,7 @@ def download(url: str) -> bytes:
 # ---------------------------------------------------------------- field-level sync (preview, then apply)
 PRODUCT_Q = """query($id:ID!){ product(id:$id){ id title descriptionHtml productType vendor tags templateSuffix status
     category{ id fullName } collections(first:50){ nodes{ id title } }
-    variants(first:100){ nodes{ id sku barcode } } media(first:50){ nodes{ alt } } } }"""
+    variants(first:100){ nodes{ id sku barcode } } media(first:50){ nodes{ id alt } } } }"""
 
 
 def get_product(pid: str) -> dict:
@@ -216,3 +223,36 @@ def add_media(pid: str, images: list[tuple[str, bytes, str]], existing_alts: set
         if errs:
             raise RuntimeError(errs[0]["message"])
     return len(todo), len(images) - len(todo)
+
+
+# ---------------------------------------------------------------- our own store as the first photo source
+def store_product(barcode: str = "", skus: list[str] | None = None) -> dict | None:
+    """Find the product on the SkyBlue store (barcode first, then each SKU / code). Returns title, description, url
+    and its image URLs (original size), or None."""
+    q_img = """query($q:String!){ productVariants(first:2, query:$q){ nodes{ id sku barcode product{ id title handle
+        descriptionHtml onlineStoreUrl media(first:30){ nodes{ ... on MediaImage{ id alt image{ url width height } } } } } } } }"""
+    tries = ([f"barcode:{barcode}"] if barcode else []) + [f'sku:"{x}"' for x in (skus or []) if x]
+    for q in tries:
+        nodes = _call(q_img, {"q": q})["productVariants"]["nodes"]
+        if not nodes:
+            continue
+        p = nodes[0]["product"]
+        tool_made = re.compile(r"\|\s*(Hero|Detail|In use|Lifestyle)\s*$", re.I)   # pushed by this tool earlier
+        imgs = [m["image"]["url"] for m in (p.get("media") or {}).get("nodes", [])
+                if m and m.get("image") and not tool_made.search(m.get("alt") or "")]
+        return {"id": p["id"], "title": p.get("title", ""), "description": p.get("descriptionHtml") or "",
+                "url": p.get("onlineStoreUrl") or "", "images": imgs,
+                "matched_by": "barcode" if q.startswith("barcode") else f"SKU {q.split(':', 1)[1].strip(chr(34))}",
+                "media": [{"id": m["id"], "alt": m.get("alt") or ""} for m in (p.get("media") or {}).get("nodes", [])
+                          if m and m.get("id")]}
+    return None
+
+
+def delete_media(pid: str, media_ids: list[str]):
+    if not media_ids:
+        return
+    d = _call("""mutation($p:ID!,$m:[ID!]!){ productDeleteMedia(productId:$p, mediaIds:$m){ mediaUserErrors{ message } } }""",
+              {"p": pid, "m": media_ids})
+    errs = d["productDeleteMedia"]["mediaUserErrors"]
+    if errs:
+        raise RuntimeError(errs[0]["message"])

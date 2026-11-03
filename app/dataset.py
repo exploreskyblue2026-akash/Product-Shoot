@@ -137,6 +137,12 @@ def seed(s: Session, owner_email: str, owner_hash: str):
         except Exception as e:
             print(f"[seed] Troika reset skipped: {e}")
         set_setting(s, "reset_troika_v1", True)
+    if not get_setting(s, "purge_prices_v1", False):        # commercial data (cost / price / stock) is never kept
+        from .db import LibProduct
+        for lp in s.scalars(select(LibProduct)):
+            if (lp.data or {}).get("prices"):
+                lp.data = {k: v for k, v in lp.data.items() if k != "prices"}
+        set_setting(s, "purge_prices_v1", True)
     if not get_setting(s, "recheck_matches_v1", False) and os.environ.get("SKIP_PRESETS") != "1":
         from .library import recheck_matches
         try:

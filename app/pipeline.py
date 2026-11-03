@@ -306,9 +306,11 @@ def process(pid: int, only: list[int] | None = None):
             for r in lib.refs_with_angles(s, key, 6):
                 angle_raw.setdefault(r["angle"] or "unknown", r["path"])
             rank = {"front": 0, "unknown": 1, "": 1, "angle": 2, "side": 3}     # whole-product views first
-            _web = {i.path for i in s.scalars(select(lib.LibImage).where(lib.LibImage.key == key, lib.LibImage.source == "website"))}
+            _src = {i.path: i.source for i in s.scalars(select(lib.LibImage).where(
+                lib.LibImage.key == key, lib.LibImage.source.in_(("store", "website"))))}
             kept = [r["path"] for r in sorted(lib.refs_with_angles(s, key, 6),
-                                              key=lambda r: (r["path"] not in _web, rank.get(r["angle"] or "", 5)))]
+                                              key=lambda r: ({"store": 0, "website": 1}.get(_src.get(r["path"]), 2),
+                                                             rank.get(r["angle"] or "", 5)))]
             if plan is not None:
                 rec = (lp.data or {}).get("plan") or {}
                 ids = rec.get("photos") or []

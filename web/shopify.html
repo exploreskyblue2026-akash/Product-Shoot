@@ -95,6 +95,7 @@ td img{width:48px;height:60px;object-fit:cover;border-radius:4px;background:var(
     <div class="stats" id="tabs" role="tablist" style="margin-bottom:12px"></div>
     <div class="row" style="margin-bottom:10px"><button class="btn primary" id="push-sel" type="button">Push selected</button><button class="btn" id="push-ready" type="button">Push all in this list</button><button class="btn" id="skip-sel" type="button">Skip selected</button>
       <label class="hint" style="align-self:center"><input type="checkbox" id="ow"> Overwrite fields that already have a value (never SKU, barcode, price or inventory)</label>
+      <label class="hint" style="align-self:center"><input type="checkbox" id="rep"> Replace the product's old images with the new shots (old ones are removed only after the new ones are uploaded)</label>
       <label class="hint" style="align-self:center"><input type="checkbox" id="only-ready" checked> Hide pushed / skipped</label></div>
     <div class="tw" id="list"></div>
   </section>
@@ -126,7 +127,7 @@ async function load(){D=await api("/api/shopify/queue");const j=D.job;$("#job").
   else{["#push-sel","#push-ready","#skip-sel"].forEach(s=>$(s).disabled=false);
     const items=D[TAB].filter(x=>!only||!["pushed","skipped"].includes(x.shopify_status||"ready"));
     $("#list").innerHTML=`<table><thead><tr><th><input type="checkbox" id="all" aria-label="Select all"></th><th></th><th>Code</th><th>Product</th><th>Barcode / SKU</th><th>Shots</th><th>Status</th><th></th></tr></thead><tbody>${items.map(x=>{const s=ST[x.shopify_status||"ready"]||["mute",x.shopify_status];
-      const note=x.shopify_status=="pushed"?`${x.shopify_added} image(s) · ${esc((x.shopify_fields||[]).join(", ")||"no fields changed")} · ${esc(x.shopify_how)}`:x.shopify_status=="failed"?esc(x.shopify_error):"";
+      const note=x.shopify_status=="pushed"?`${x.shopify_added} image(s)${x.shopify_replaced?` (${x.shopify_replaced} old removed)`:""} · ${esc((x.shopify_fields||[]).join(", ")||"no fields changed")} · ${esc(x.shopify_how)}`:x.shopify_status=="failed"?esc(x.shopify_error):"";
       return `<tr><td><input type="checkbox" data-id="${x.id}" aria-label="Select ${esc(x.code)}"></td><td>${x.hero?`<img src="${esc(x.hero)}" alt="">`:""}</td><td class="mono">${esc(x.code)}</td><td>${esc(x.name)}<div class="hint">${esc(x.brand)}</div></td>
         <td class="mono">${esc(x.barcode||"—")}<div class="hint">${esc(x.sku)}</div></td><td>${x.images}</td><td><span class="chip ${s[0]}">${s[1]}</span><div class="hint">${note}</div></td><td><button class="btn sm" type="button" data-pv="${x.id}">Preview</button></td></tr>`}).join("")||'<tr><td colspan="8" class="empty">Nothing here.</td></tr>'}</tbody></table>`;
     $("#all").onchange=e=>document.querySelectorAll("#list [data-id]").forEach(x=>x.checked=e.target.checked)}
@@ -134,7 +135,8 @@ async function load(){D=await api("/api/shopify/queue");const j=D.job;$("#job").
 const sel=()=>[...document.querySelectorAll("#list [data-id]:checked")].map(x=>+x.dataset.id);
 async function push(ids){if(!ids.length)return toast("Select products first");const ow=$("#ow").checked;
   if(ow&&!confirm("Overwrite existing Shopify fields (title, description, category, type, vendor, template) for "+ids.length+" product(s)?"))return;
-  try{await api("/api/shopify/push",{method:"POST",body:{ids,overwrite:ow}});toast(`Pushing ${ids.length} product(s)…`);setTimeout(load,800)}catch(e){toast(e.message)}}
+  const rep=$("#rep").checked;if(rep&&!confirm("Remove the old images of "+ids.length+" product(s) on your store after the new shots are uploaded?"))return;
+  try{await api("/api/shopify/push",{method:"POST",body:{ids,overwrite:ow,replace_images:rep}});toast(`Pushing ${ids.length} product(s)…`);setTimeout(load,800)}catch(e){toast(e.message)}}
 $("#push-sel").onclick=()=>push(sel());
 $("#push-ready").onclick=()=>push(D[TAB].filter(x=>!x.shopify_status||x.shopify_status=="ready"||x.shopify_status=="failed").map(x=>x.id));
 $("#skip-sel").onclick=async()=>{const ids=sel();if(!ids.length)return;await api("/api/shopify/skip",{method:"POST",body:{ids}});load()};

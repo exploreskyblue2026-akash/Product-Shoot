@@ -667,7 +667,7 @@ SETTING_KEYS = ["engine_mode", "library_autoscan", "library_focus", "library_dri
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr",
                 "model_hero", "model_detail", "model_use_case", "model_lifestyle", "escalate_model",
                 "planner_on", "plan_review", "model_planner", "static_rules", "hero_review",
-                "use_openrouter", "use_shopify", "use_drive", "use_websites", "auto_prepare", "auto_send_studio"]
+                "use_openrouter", "use_shopify", "use_drive", "use_websites", "auto_prepare", "auto_send_studio", "store_first"]
 
 
 @app.get("/api/admin/settings")
@@ -865,6 +865,18 @@ def _auto_prepare(s, r):
     return r
 
 
+class MasterIn(BaseModel):
+    link: str
+
+
+@app.post("/api/library/master-link")
+def master_link(body: MasterIn, u=Depends(need("admin"))):
+    """Connect the company master sheet (Google Sheets link, shared read-only with the tool's service account)."""
+    _switch("use_drive", "Google Drive")
+    _bg("Syncing the master sheet", lambda s: _auto_prepare(s, library.sync_master_link(s, body.link, force=True)))
+    return {"ok": True}
+
+
 class CodesIn(BaseModel):
     text: str
     replace: bool = False
@@ -937,6 +949,9 @@ def library_state(u=Depends(need("viewer"))):
                        for it in (get_setting(s, "shoot_list", []) or [])]
         r["auto_prepare"] = get_setting(s, "auto_prepare", True)
         r["auto_send_studio"] = get_setting(s, "auto_send_studio", False)
+        r["master_link"] = get_setting(s, "master_sheet_link", "")
+        r["master_synced"] = get_setting(s, "master_sheet_synced", "")
+        r["store_first"] = get_setting(s, "store_first", True)
         return r
 
 
@@ -1460,6 +1475,7 @@ def shopify_preview(pid: int, overwrite: bool = False, u=Depends(need("editor"))
 class PushIn(BaseModel):
     ids: list[int]
     overwrite: bool = False
+    replace_images: bool = False
 
 
 @app.post("/api/shopify/push")
@@ -1479,7 +1495,7 @@ def shopify_push(body: PushIn, u=Depends(need("editor"))):
                     if not p:
                         continue
                     try:
-                        shopq.push_one(s, p, body.overwrite)
+                        shopq.push_one(s, p, body.overwrite, body.replace_images)
                         ok += 1
                     except Exception as e:
                         s.rollback()
@@ -1614,11 +1630,25 @@ def _autoscan_loop():
                 link = get_setting(s, "library_drive_link", "")
                 on = get_setting(s, "library_autoscan", True) and get_setting(s, "use_drive", True)
                 last = get_setting(s, "library_last_scan", "") or ""
-            if not (link and on) or _lib_job["running"]:
+            with SessionLocal() as s:
+                has_master = bool(get_setting(s, "master_sheet_link", ""))
+            if not on or not (link or has_master) or _lib_job["running"]:
                 continue
             if last and (_dt.now(_tz.utc) - _dt.fromisoformat(last)).total_seconds() < 1800:
                 continue
-            _bg("Automatic Drive scan", lambda s: _auto_prepare(s, library.scan_drive(s, link)))
+            def _scan(s, link=link):
+                ml = get_setting(s, "master_sheet_link", "")
+                if ml:
+                    try:
+                        library.sync_master_link(s, ml)
+                    except Exception as e:
+                        print(f"[library] master sheet sync failed: {e}")
+                if not link:
+                    from datetime import datetime as _d2, timezone as _z2
+                    set_setting(s, "library_last_scan", _d2.now(_z2.utc).isoformat())
+                    s.commit()
+                return _auto_prepare(s, library.scan_drive(s, link) if link else "master sheet checked")
+            _bg("Automatic Drive scan", _scan)
         except Exception as e:
             print(f"[autoscan] {str(e)[:160]}")
 

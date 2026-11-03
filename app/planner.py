@@ -170,7 +170,7 @@ def photos_for(s: Session, key: str, limit: int = 6) -> list[LibImage]:
             if not (i.meta or {}).get("discarded") and i.cut_status != "skip" and (i.meta or {}).get("kit") in (None, "approved")]
     real = [i for i in imgs if i.source not in ("catalogue", "kit")]
     imgs = real or imgs
-    imgs.sort(key=lambda i: (i.source != "website", not i.primary, i.source == "kit", -(i.w * i.h)))
+    imgs.sort(key=lambda i: ({"store": 0, "website": 1}.get(i.source, 2), not i.primary, i.source == "kit", -(i.w * i.h)))
     return [i for i in imgs if restore(i.path)][:limit]
 
 
@@ -187,7 +187,8 @@ def make_plan(s: Session, key: str, prov, charge=None) -> dict:
     facts = {"product_id": lp.product_id, "name": lp.name, "brand": lp.brand, "category": lp.category,
              "ean": lp.ean, "seo_title": (ld.get("titles") or {}).get("seo optimised title", ""),
              "photo_names": [i.src_name for i in imgs],
-             "official_website": {k: v for k, v in (ld.get("web") or {}).items() if k in ("url", "title", "description", "dimensions")}}
+             "official_website": {k: v for k, v in (ld.get("web") or {}).items() if k in ("url", "title", "description", "dimensions")},
+             "skyblue_store": {"title": (ld.get("store") or {}).get("title", ""), "description": ld.get("store_description", "")}}
     busy = any(w in (lp.name or "").lower() for w in ("set", " x", "pack", "assorted", "colours", "colors"))
     prompt = INSTRUCTIONS.format(hero_props="0-1 small props, the set itself is busy" if busy else "1-3 small props at the edges",
                                  static=static_rules(s), shot_rules=_shot_rules(s), brand=brand_txt,

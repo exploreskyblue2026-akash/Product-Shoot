@@ -212,7 +212,7 @@ def plan(s: Session, p: Product, overwrite: bool = False, prov=None) -> dict:
             "info": {**info, "description": want["descriptionHtml"], "category_id": cat["id"] if cat else ""}}
 
 
-def push_one(s: Session, p: Product, overwrite: bool = False) -> dict:
+def push_one(s: Session, p: Product, overwrite: bool = False, replace_images: bool = False) -> dict:
     from .connectors import shopify
     imgs = images_for(p)
     if not imgs:
@@ -228,10 +228,17 @@ def push_one(s: Session, p: Product, overwrite: bool = False) -> dict:
         if pl["add_collections"]:
             shopify.apply(pid, "", {}, pl["add_collections"])
         existing, how = set(), "new draft product"
+    old_media = []
+    if replace_images and pl["found"]:                 # remember what was there before this push
+        old_media = [m["id"] for m in (shopify.get_product(pid).get("media") or {}).get("nodes", []) if m.get("id")]
+        existing = set()                               # upload the full new set, then remove every old image
     added, skipped = shopify.add_media(pid, imgs, existing)
+    if old_media and added:                            # only after the new shots are safely on the product
+        shopify.delete_media(pid, old_media)
     filled = [r["field"] for r in pl["rows"] if r["action"] in ("fill", "overwrite", "add") and r["field"] != "Images"]
     p.shopify_id = pid
     p.data = {**(p.data or {}), "shopify": {"status": "pushed", "how": how, "added": added, "skipped": skipped,
+                                            "replaced": len(old_media) if added else 0,
                                             "fields": filled, "product_id": pid,
                                             "at": datetime.now(timezone.utc).isoformat(timespec="minutes")}}
     log(s, "shopify", f"{p.code}: {added} image(s), fields {', '.join(filled) or 'none'} ({how})")
