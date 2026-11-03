@@ -363,8 +363,13 @@ def pick_primary(s: Session, key: str, force_id: int | None = None):
     best = next((i for i in imgs if i.id == force_id), None)
     if best is None:
         usable = [i for i in imgs if i.cut_status != "skip" and i.source != "kit"] or [i for i in imgs if i.source != "kit"] or imgs
+        usable = [i for i in usable if not (i.meta or {}).get("discarded")] or usable
         good = [i for i in usable if not (i.meta or {}).get("flags")] or usable
-        best = cur if cur and cur.cut_status in ("ok", "check") else max(good, key=lambda i: (i.w * i.h) * (2 if (i.meta or {}).get("angle") == "front" else 1))
+        web = [i for i in good if i.source == "website"]            # official website photos always come first
+        pool = web or good
+        best = cur if (cur and cur.cut_status in ("ok", "check") and not web) else max(
+            pool, key=lambda i: (i.w * i.h) * (2 if (i.meta or {}).get("angle") == "front" else 1)
+            * (3 if re.search(r"_0?1[_.]", i.src_name or "") else 1))   # the site's first gallery image = main view
     for i in imgs:
         i.primary = i is best
     for i in s.scalars(select(LibImage).where(LibImage.key == key, LibImage.dup_of.is_not(None))):
@@ -400,7 +405,9 @@ def add_sheet(s: Session, data: bytes, name: str) -> str:
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True)
     head = [str(x or "").strip().lower() for x in next(wb.worksheets[0].iter_rows(values_only=True), [])]
-    if "shoot" in head or ("shots" in head and len(head) <= 6):
+    codeish = {"code", "codes", "product code", "product codes", "product id", "sku", "ean", "barcode", "item code"}
+    if "shoot" in head or ("shots" in head and len(head) <= 6) or (len([h for h in head if h]) <= 3 and codeish & set(head)
+                                                                   and "item name" not in head):
         r = import_shoot(s, data, name)
         return f"{name}: shoot sheet, {r['items']} products ({r['found']} found)"
     r = import_master(s, data, name)
@@ -679,7 +686,8 @@ def refs_with_angles(s: Session, key: str, limit: int = 4) -> list[dict]:
             if (i.meta or {}).get("kit") in (None, "approved") and not (i.meta or {}).get("discarded")]
     if any(i.source not in ("catalogue", "kit") for i in live):   # real photos of this exact code exist:
         live = [i for i in live if i.source != "catalogue"]         # never mix in catalogue pictures
-    live.sort(key=lambda i: (not i.primary, i.source == "kit", bool((i.meta or {}).get("flags")), -(i.w * i.h)))
+    live.sort(key=lambda i: (i.source != "website", not i.primary, i.source == "kit", bool((i.meta or {}).get("flags")),
+                             -(i.w * i.h)))
     from .connectors.mirror import restore
     live = [i for i in live if restore(i.path)]          # photo lost in a redeploy and not in Drive: skip it
     return [{"path": i.path, "angle": (i.meta or {}).get("angle", ""), "id": i.id} for i in live[:limit]]
@@ -950,6 +958,18 @@ def web_fetch(s: Session, key: str) -> dict:
     codes = [c for c in [lp.product_id, lp.item_code] + list(((lp.data or {}).get("skus") or [])) if c]
     idx = get_setting(s, f"webindex:{bkey}", {}) or {}
     url = website.lookup(idx, lp.ean, [lp.product_id])
+    import time as _t
+    deadline = _t.time() + 15 * 60
+    while not url and b.get("website") and _t.time() < deadline:      # index not complete yet: keep reading the site
+        urls = idx.get("urls") or []
+        if urls and idx.get("done", 0) >= len(urls):
+            break
+        before = (len(urls), idx.get("done", 0))
+        r = web_index(s, bkey, budget=150)
+        idx = get_setting(s, f"webindex:{bkey}", {}) or {}
+        url = website.lookup(idx, lp.ean, [lp.product_id])
+        if (r["pages"], r["indexed"]) == before or not r["pages"]:
+            break
     facts = None
     if not url and b.get("web_search"):
         for cand in website.search_candidates(b["web_search"], lp.product_id or lp.ean)[:8]:

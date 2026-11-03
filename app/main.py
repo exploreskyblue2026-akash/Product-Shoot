@@ -667,7 +667,7 @@ SETTING_KEYS = ["engine_mode", "library_autoscan", "library_focus", "library_dri
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr",
                 "model_hero", "model_detail", "model_use_case", "model_lifestyle", "escalate_model",
                 "planner_on", "plan_review", "model_planner", "static_rules", "hero_review",
-                "use_openrouter", "use_shopify", "use_drive", "use_websites"]
+                "use_openrouter", "use_shopify", "use_drive", "use_websites", "auto_prepare", "auto_send_studio"]
 
 
 @app.get("/api/admin/settings")
@@ -844,6 +844,82 @@ def _bg(name: str, fn):
     threading.Thread(target=run, daemon=True).start()
 
 
+def _auto_prepare(s, r):
+    """After new files or a code sheet: prepare waiting codes straight away (website first, analysis, ready)."""
+    from . import libqueue
+    waiting = [it for it in (get_setting(s, "shoot_list", []) or []) if (it.get("prep") or {}).get("state", "waiting")
+               in ("waiting", "needs_photo")]
+    if waiting and get_setting(s, "auto_prepare", True):
+        if any((it.get("prep") or {}).get("state") == "needs_photo" for it in waiting):
+            for it in waiting:                          # new photos may have arrived for these
+                if (it.get("prep") or {}).get("state") == "needs_photo":
+                    libqueue.reset_item(s, it["code"])
+        _lib_job["msg"] = "Preparing the Library queue…"
+        return f"{r} · queue: {libqueue.prepare(s)}"
+    return r
+
+
+class CodesIn(BaseModel):
+    text: str
+    replace: bool = False
+
+
+@app.post("/api/library/codes")
+def library_codes(body: CodesIn, u=Depends(need("editor"))):
+    """Paste product codes (any brand, one per line): they join the Library queue and are prepared automatically."""
+    from . import libqueue
+
+    def run(s):
+        r = libqueue.add_codes(s, body.text, body.replace)
+        return _auto_prepare(s, f"{r['added']} code(s) added")
+    _bg("Adding codes", run)
+    return {"ok": True}
+
+
+@app.post("/api/library/prepare")
+def library_prepare(u=Depends(need("editor"))):
+    from . import libqueue
+    _bg("Preparing the Library queue", lambda s: libqueue.prepare(s))
+    return {"ok": True}
+
+
+class QueueSetIn(BaseModel):
+    auto_prepare: bool | None = None
+    auto_send_studio: bool | None = None
+
+
+@app.put("/api/library/queue-settings")
+def library_queue_settings(body: QueueSetIn, u=Depends(need("editor"))):
+    with SessionLocal() as s:
+        for k in ("auto_prepare", "auto_send_studio"):
+            v = getattr(body, k)
+            if v is not None:
+                set_setting(s, k, v)
+        s.commit()
+    return {"ok": True}
+
+
+class SendIn(BaseModel):
+    keys: list[str] | None = None
+
+
+@app.post("/api/library/send")
+def library_send(body: SendIn, u=Depends(need("editor"))):
+    from . import libqueue
+    with SessionLocal() as s:
+        return {"ok": True, **libqueue.send(s, body.keys)}
+
+
+@app.post("/api/library/queue/retry")
+def library_retry(body: CodesIn, u=Depends(need("editor"))):
+    from . import libqueue
+    with SessionLocal() as s:
+        for c in [x.strip() for x in body.text.split("\n") if x.strip()]:
+            libqueue.reset_item(s, c)
+    _bg("Preparing the Library queue", lambda s: libqueue.prepare(s))
+    return {"ok": True}
+
+
 @app.get("/api/library")
 def library_state(u=Depends(need("viewer"))):
     with SessionLocal() as s:
@@ -851,13 +927,20 @@ def library_state(u=Depends(need("viewer"))):
         r["job"] = dict(_lib_job)
         r["drive_link"] = get_setting(s, "library_drive_link", "")
         r["cutouts_folder"] = bool(get_setting(s, "cutouts_drive_folder", ""))
+        r["lqueue"] = [{k: it.get(k) for k in ("code", "key", "match", "prep", "priority")}
+                       for it in (get_setting(s, "shoot_list", []) or [])]
+        r["auto_prepare"] = get_setting(s, "auto_prepare", True)
+        r["auto_send_studio"] = get_setting(s, "auto_send_studio", False)
         return r
 
 
 @app.post("/api/library/upload")
 async def library_upload(files: list[UploadFile] = File(...), u=Depends(need("editor"))):
     payload = [(f.filename or "file", await f.read()) for f in files]
-    _bg(f"Upload of {len(payload)} file(s)", lambda s: library.add_files(s, payload))
+    def run(s):
+        r = library.add_files(s, payload)
+        return _auto_prepare(s, r)
+    _bg(f"Upload of {len(payload)} file(s)", run)
     return {"ok": True}
 
 
@@ -868,7 +951,7 @@ class LinkIn(BaseModel):
 @app.post("/api/library/scan")
 def library_scan(body: LinkIn, u=Depends(need("editor"))):
     _switch("use_drive", "Google Drive")
-    _bg("Drive scan", lambda s: library.scan_drive(s, body.link, reread=True))
+    _bg("Drive scan", lambda s: _auto_prepare(s, library.scan_drive(s, body.link, reread=True)))
     return {"ok": True}
 
 
@@ -1529,7 +1612,7 @@ def _autoscan_loop():
                 continue
             if last and (_dt.now(_tz.utc) - _dt.fromisoformat(last)).total_seconds() < 1800:
                 continue
-            _bg("Automatic Drive scan", lambda s: library.scan_drive(s, link))
+            _bg("Automatic Drive scan", lambda s: _auto_prepare(s, library.scan_drive(s, link)))
         except Exception as e:
             print(f"[autoscan] {str(e)[:160]}")
 

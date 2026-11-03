@@ -52,11 +52,18 @@ SCHEMA = {
     "hero_features": ["1-3 things a buyer must see, most important first"],
     "risks": ["what an image AI is likely to get wrong"],
     "must_keep": ["short list of things that must never change"],
-    "shots": {k: {"goal": "", "scene": "", "surface": "", "camera": "angle + lens feel", "composition": "placement + % of frame",
-                  "props": ["plain, unbranded"], "hands": "none or who/how", "product_state": "", "light": "", "notes": "",
+    "shots": {k: {"goal": "", "scene": "the real place, e.g. kid's study desk by a window",
+                  "surface": "material + colour + texture, e.g. pale oak desk, fine grain",
+                  "backdrop": "what is behind, e.g. plain warm-white wall, softly out of focus",
+                  "camera": "angle + lens feel", "composition": "product position + % of frame + negative space",
+                  "props": [{"item": "e.g. spiral sketchbook", "material": "", "colour": "", "size_vs_product": "e.g. 2x longer",
+                             "position": "e.g. back-left, half out of frame, out of focus", "why": "why it belongs with this product"}],
+                  "hands": "none or who/how", "product_state": "", "light": "direction, softness, how reflective parts look",
+                  "notes": "",
                   "reference_photo": "index of the photo the image model should copy for this shot"}
               for k in SHOTS},
     "best_reference": "index of the ONE photo that shows the whole single product most clearly (shape, colour, clip, logo)",
+    "self_check": ["each studio rule you checked the plans against and what you changed"],
     "review_needed": False,
     "review_reason": "",
 }
@@ -86,7 +93,16 @@ Do this in order and return ONE JSON object exactly in the schema at the end:
    feature in a way that explains it (e.g. a fountain-pen nib writing, a multi-tool opened out, the tips of a colour set in
    order). USE CASE shows the right user using it in the right place (hands only if they fit the use and the brand allows).
    LIFESTYLE shows its world, wider, in the brand mood. Only plan angles and parts the photos actually show.
-   Keep every plan concrete and short (each field one sentence).
+   SET DESIGN for every shot, like a real in-house photographer: a specific surface (material, colour, texture) and
+   backdrop that suit the product's category, user and the brand palette; 1-3 props for the hero (more for lifestyle),
+   each a real, plain, unbranded object with its material, colour, real size compared with the product, exact position
+   and why it belongs (e.g. kids' stationery -> drawing book, crayons; office pen -> notebook, desk tray; art material ->
+   paper, palette). Props never touch or hide the logo or print and are never other products of any brand.
+   Light: soft studio light, its direction, how shiny / metallic / glossy parts should reflect.
+   Keep every field concrete and short (one sentence).
+   SELF-CHECK: before answering, check every shot plan against the STUDIO RULES (nothing floating, no studio lights in
+   frame, no branded or logo props, real scale, product unchanged and fully visible, props make sense) and fix it; list
+   what you checked in self_check.
 9. REFERENCES - best_reference: the index of the photo showing the whole product most clearly. For each shot,
    reference_photo: the index of the photo the image model should copy (usually best_reference; a close-up for detail
    only if it shows the planned feature).
@@ -154,7 +170,7 @@ def photos_for(s: Session, key: str, limit: int = 6) -> list[LibImage]:
             if not (i.meta or {}).get("discarded") and i.cut_status != "skip" and (i.meta or {}).get("kit") in (None, "approved")]
     real = [i for i in imgs if i.source not in ("catalogue", "kit")]
     imgs = real or imgs
-    imgs.sort(key=lambda i: (not i.primary, i.source == "kit", -(i.w * i.h)))
+    imgs.sort(key=lambda i: (i.source != "website", not i.primary, i.source == "kit", -(i.w * i.h)))
     return [i for i in imgs if restore(i.path)][:limit]
 
 
@@ -259,6 +275,14 @@ def _j(v) -> str:
     return str(v or "").strip()
 
 
+def _prop(x) -> str:
+    if not isinstance(x, dict):
+        return str(x)
+    bits = [x.get("item", ""), ", ".join(v for v in (x.get("material"), x.get("colour")) if v),
+            f"{x['size_vs_product']} the product" if x.get("size_vs_product") else "", x.get("position", "")]
+    return " - ".join(b for b in bits if b)
+
+
 def render(plan: dict, kind: str, static: str, anchored: bool, approved_facts: str = "") -> str:
     """Labelled plain-English sections, most important first. The image model never sees raw JSON."""
     ap, idn, sh = plan.get("appearance") or {}, plan.get("identity") or {}, (plan.get("shots") or {}).get(kind) or {}
@@ -288,11 +312,13 @@ def render(plan: dict, kind: str, static: str, anchored: bool, approved_facts: s
         "PRODUCT - DO NOT CHANGE: " + "; ".join(p for p in product if p) + ".",
         f"MUST KEEP: {_j(plan.get('must_keep'))}." if plan.get("must_keep") else "",
         approved_facts,
-        f"SHOT {SHOT_TITLE.get(kind, kind)}: {sh.get('goal', '')} Scene: {sh.get('scene', '')} on {sh.get('surface', '')}. "
-        f"Product: {sh.get('product_state', 'as in the photos')}.",
+        f"SHOT {SHOT_TITLE.get(kind, kind)}: {sh.get('goal', '')}",
+        f"SET: {sh.get('scene', '')}. Surface: {sh.get('surface', '')}."
+        + (f" Backdrop: {sh['backdrop']}." if sh.get("backdrop") else "")
+        + f" Product: {sh.get('product_state', 'as in the photos')}.",
         f"CAMERA & COMPOSITION: {sh.get('camera', '')}. {sh.get('composition', '')}.",
         f"LIGHT: {sh.get('light') or 'soft diffused studio light from the upper left, gentle natural shadow'}.",
-        f"PROPS: {_j(sh.get('props'))} - plain, unbranded, real scale, at the edges, never covering the logo or print."
+        ("PROPS (plain, unbranded, real scale, never covering the logo or print): " + "; ".join(_prop(x) for x in sh["props"]) + ".")
         if sh.get("props") else "",
         f"HANDS / PEOPLE: {sh['hands']}." if sh.get("hands") and str(sh["hands"]).lower() not in ("none", "no", "") else "HANDS / PEOPLE: none.",
         f"SCALE: {size.get('dimensions', '')}{' (approx.)' if size.get('estimated') else ''}; {size.get('scale_hint', '')}."

@@ -21,7 +21,8 @@ def client():
     r = c.post("/api/login", json={"email": "owner@test.com", "password": "pw-for-tests"})
     assert r.status_code == 200, r.text
     c.post("/api/autopilot", json={"pipeline_mode": "v1"})   # legacy 'add input' flow; shoot-sheet tests switch to v2
-    c.put("/api/admin/settings", json={"hero_review": False})   # older tests generate all shots in one go
+    c.put("/api/admin/settings", json={"hero_review": False,   # older tests generate all shots in one go
+                                       "auto_prepare": False, "use_websites": False})   # never reach real websites
     return c
 
 
@@ -1061,3 +1062,58 @@ def test_openrouter_switched_off_means_gemini_only():
     finally:
         mock.MockProvider.generate = og
         c.put("/api/admin/settings", json={"model_hero": "", "use_shopify": True})
+
+
+def test_library_queue_codes_any_brand_website_first_then_studio():
+    import io
+    from PIL import Image, ImageDraw
+    from app.connectors import website
+    from app.db import SessionLocal, LibProduct, LibImage, Product, set_setting
+    from app.brands import brand_rows
+    from sqlalchemy import select
+    c = client()
+    c.post("/api/library/clear")
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (Path(__file__).parent / "library" / "master.xlsx").read_bytes(), "x/y"))])
+    wait_job(c)
+    with SessionLocal() as s:                                   # Troika gets a website + a ready index
+        row = brand_rows(s)["troika"]
+        row.data = {**row.data, "website": "https://www.troika.example"}
+        set_setting(s, "webindex:troika", {"urls": ["https://www.troika.example/p/kr18", "https://www.troika.example/p/new1"],
+                                           "done": 2, "pages": {"https://www.troika.example/p/kr18": {"r": ["KR1805BR"], "e": []},
+                                                                "https://www.troika.example/p/new1": {"r": ["NEWPEN77"], "e": []}}})
+        s.commit()
+    def pic(col, big=True):
+        im = Image.new("RGB", (1600, 1600) if big else (900, 900), (248, 248, 248))
+        ImageDraw.Draw(im).rectangle([500, 400, 1100, 1200], fill=col); b = io.BytesIO(); im.save(b, "JPEG"); return b.getvalue()
+    pages = {"https://www.troika.example/p/kr18": "<p>Art.-Nr.: KR18/05/BR</p><img src='/img/kr1805br_01_l.jpg'><img src='/img/kr1805br_02_l.jpg'>",
+             "https://www.troika.example/p/new1": "<title>New pen</title><p>Ref: NEWPEN77</p><img src='/img/newpen77_01_l.jpg'>"}
+    og, od = website._get, website.download
+    website._get = lambda url, client: pages[url]
+    website.download = lambda url: pic((20, 60, 200)) if "_01_" in url else pic((240, 180, 10)).replace(b"\xff\xd9", b"") + _shape()
+    def _shape():
+        im = Image.new("RGB", (1600, 1600), (248, 248, 248)); ImageDraw.Draw(im).ellipse([300, 300, 1300, 1300], fill=(240, 180, 10))
+        b = io.BytesIO(); im.save(b, "JPEG"); return b.getvalue()
+    website.download = lambda url: pic((20, 60, 200)) if "_01_" in url else _shape()
+    c.put("/api/admin/settings", json={"use_websites": True, "planner_on": True, "plan_review": "never"})
+    c.put("/api/library/queue-settings", json={"auto_prepare": True, "auto_send_studio": True})
+    try:
+        # a raw photo already filed under the same code joins the cluster too
+        c.post("/api/library/upload", files=[("files", ("KR18-05-BR raw.jpg", pic((200, 30, 30), big=False), "image/jpeg"))])
+        wait_job(c)
+        c.post("/api/library/codes", json={"text": "KR18/05/BR\nNEWPEN77\nNOPE-123", "replace": True})
+        wait_job(c, 90)
+    finally:
+        website._get, website.download = og, od
+        c.put("/api/admin/settings", json={"use_websites": False})
+        c.put("/api/library/queue-settings", json={"auto_prepare": False, "auto_send_studio": False})
+    q = {i["code"]: i for i in c.get("/api/library").json()["lqueue"]}
+    assert q["KR18/05/BR"]["prep"]["state"] == "sent" and q["KR18/05/BR"]["prep"]["website_photos"] == 2
+    assert q["KR18/05/BR"]["prep"]["photos"] == 3                       # website + raw photo in one cluster
+    assert q["NEWPEN77"]["prep"]["state"] == "sent" and "official website" in q["NEWPEN77"]["match"]
+    assert q["NOPE-123"]["prep"]["state"] == "not_found"
+    with SessionLocal() as s:
+        prim = s.scalar(select(LibImage).where(LibImage.key == "KR1805BR", LibImage.primary == True))  # noqa: E712
+        assert prim.source == "website"                                     # official photo is the main one
+        assert s.scalar(select(LibProduct).where(LibProduct.key == "NEWPEN77")).brand
+        queued = {(p.data or {}).get("lib_key") for p in s.scalars(select(Product))}
+        assert {"KR1805BR", "NEWPEN77"} <= queued
