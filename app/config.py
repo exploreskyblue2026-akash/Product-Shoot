@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.6.2 (fix: long store codes no longer stop an upload)"
+APP_VERSION = "4.6.3 (store export imports in seconds)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

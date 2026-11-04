@@ -1222,7 +1222,7 @@ def import_store_csv(s: Session, data: bytes, filename: str = "products_export.c
                 break
         if lp is None:
             key = (norm(pid) or norm(item) or norm(h))[:80]                  # database limits: never fail an import
-            lp = s.scalar(select(LibProduct).where(LibProduct.key == key))
+            lp = idx.get(key)
             if lp is None:
                 lp = LibProduct(key=key, product_id=(pid or item or h)[:80], item_code=norm(item)[:40], name=d["title"][:300],
                                 brand=d["vendor"][:80], category=d["type"][:80], ean=norm(ean)[:40], data={})
@@ -1236,8 +1236,9 @@ def import_store_csv(s: Session, data: bytes, filename: str = "products_export.c
         lp.brand = lp.brand or d["vendor"][:80]
         lp.data = {**(lp.data or {}), "store_images": imgs[:12], "store": {"title": d["title"], "handle": h, "matched_by": "store export"},
                    "skus": list(dict.fromkeys(list((lp.data or {}).get("skus") or []) + d["skus"]))}
-        s.flush()
-        idx = _index(s) if lp.key not in idx else idx
+        for k in (lp.key, lp.item_code, lp.ean):        # keep the lookup up to date without re-reading the database
+            if k:
+                idx.setdefault(norm(k), lp)
     log(s, "library", f"Store export {filename}: {len(by)} products ({added} new, {linked} matched to the master sheet)")
     s.commit()
     return {"products": len(by), "new": added, "matched": linked}
