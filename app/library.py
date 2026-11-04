@@ -390,6 +390,10 @@ def add_files(s: Session, files: list[tuple[str, bytes]]) -> dict:
         if low.endswith((".xlsx", ".xlsm")):
             stats["sheets"].append(add_sheet(s, data, name))
             idx = _index(s)
+        elif low.endswith(".csv"):
+            r = import_store_csv(s, data, name)
+            stats["sheets"].append(f"{name}: SkyBlue store export, {r['products']} products ({r['new']} new)")
+            idx = _index(s)
         elif low.endswith(".zip"):
             with zipfile.ZipFile(io.BytesIO(data)) as z:
                 for n in z.namelist():
@@ -1111,7 +1115,12 @@ def store_fetch(s: Session, key: str) -> dict:
     if lp is None:
         raise ValueError("Unknown product")
     skus = [c for c in list((lp.data or {}).get("skus") or []) + [lp.product_id, lp.item_code] if c]
-    hit = shopify.store_product(lp.ean or "", skus)
+    exported = list((lp.data or {}).get("store_images") or [])
+    if exported:                                       # from the store export: no API call needed
+        hit = {"id": "", "title": ((lp.data or {}).get("store") or {}).get("title", ""), "description": "", "url": "",
+               "images": exported, "matched_by": "store export"}
+    else:
+        hit = shopify.store_product(lp.ean or "", skus) if shopify.configured() else None
     if not hit:
         raise ValueError("Not on the SkyBlue store (no product with this barcode / SKU)")
     have = {(i.meta or {}).get("web_url") for i in s.scalars(select(LibImage).where(LibImage.key == key))}
@@ -1160,3 +1169,66 @@ def sync_master_link(s: Session, link: str | None = None, force: bool = False) -
     set_setting(s, "master_sheet_synced", _dt.now(_tz.utc).isoformat(timespec="minutes"))
     s.commit()
     return f"{meta['name']}: {r['added']} new, {r['updated']} updated products"
+
+
+# ------------------------------------------------------------------ SkyBlue store export (Shopify products CSV)
+def import_store_csv(s: Session, data: bytes, filename: str = "products_export.csv") -> dict:
+    """Shopify admin -> Products -> Export (CSV). Every store product becomes a library product we can shoot:
+    title, vendor (brand), type, SKUs, barcodes and its image links. The SkyBlue item code is read from the SKU
+    (e.g. TROIKA_POUCH_BCO64/GY_75573 -> item code 75573, product id BCO64/GY). Images are downloaded later, per code."""
+    import csv
+    rows = list(csv.DictReader(io.StringIO(data.decode("utf-8-sig", "replace"))))
+    if not rows or "Handle" not in rows[0]:
+        raise ValueError("Not a Shopify products export (no Handle column)")
+    by: dict[str, dict] = {}
+    for r in rows:
+        h = (r.get("Handle") or "").strip()
+        if not h:
+            continue
+        d = by.setdefault(h, {"title": "", "vendor": "", "type": "", "skus": [], "barcodes": [], "images": []})
+        d["title"] = d["title"] or (r.get("Title") or "").strip()
+        d["vendor"] = d["vendor"] or (r.get("Vendor") or "").strip()
+        d["type"] = d["type"] or (r.get("Type") or r.get("Product Category") or "").strip()
+        if (r.get("Variant SKU") or "").strip():
+            d["skus"].append(r["Variant SKU"].strip().lstrip("'"))
+        if (r.get("Variant Barcode") or "").strip():
+            d["barcodes"].append(re.sub(r"\D", "", r["Variant Barcode"]))
+        src, alt = (r.get("Image Src") or "").strip(), (r.get("Image Alt Text") or "")
+        if src and not re.search(r"\|\s*(Hero|Detail|In use|Lifestyle)\s*$", alt, re.I):   # never our own AI shots
+            pos = int(r.get("Image Position") or 99) if str(r.get("Image Position") or "").isdigit() else 99
+            d["images"].append((pos, src))
+    idx = _index(s)
+    added = linked = 0
+    for h, d in by.items():
+        imgs = [u for _, u in sorted(set(d["images"]))]
+        sku = d["skus"][0] if d["skus"] else ""
+        parts = [x for x in re.split(r"[_\s]+", sku) if x]
+        item = next((x for x in reversed(parts) if re.fullmatch(r"\d{3,7}", x)), "")
+        pid = parts[-2] if item and len(parts) >= 3 else (sku if not item else "")
+        ean = d["barcodes"][0] if d["barcodes"] else ""
+        lp = None
+        for c in (item, pid, ean):
+            if c and norm(c) in idx:
+                lp = idx[norm(c)]
+                break
+        if lp is None:
+            key = norm(pid) or norm(item) or norm(h)
+            lp = s.scalar(select(LibProduct).where(LibProduct.key == key))
+            if lp is None:
+                lp = LibProduct(key=key, product_id=pid or item or h, item_code=norm(item), name=d["title"][:300],
+                                brand=d["vendor"][:80], category=d["type"][:80], ean=norm(ean), data={})
+                s.add(lp)
+                added += 1
+        else:
+            linked += 1
+        lp.item_code = lp.item_code or norm(item)
+        lp.ean = lp.ean or norm(ean)
+        lp.name = lp.name or d["title"][:300]
+        lp.brand = lp.brand or d["vendor"][:80]
+        lp.data = {**(lp.data or {}), "store_images": imgs[:12], "store": {"title": d["title"], "handle": h, "matched_by": "store export"},
+                   "skus": list(dict.fromkeys(list((lp.data or {}).get("skus") or []) + d["skus"]))}
+        s.flush()
+        idx = _index(s) if lp.key not in idx else idx
+    log(s, "library", f"Store export {filename}: {len(by)} products ({added} new, {linked} matched to the master sheet)")
+    s.commit()
+    return {"products": len(by), "new": added, "matched": linked}

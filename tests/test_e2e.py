@@ -1205,3 +1205,35 @@ def test_store_first_then_brand_site_and_master_sheet_columns():
         assert shopify.store_product("123")["images"] == ["https://cdn/real.jpg"]
     finally:
         shopify._call = oc2
+
+
+def test_store_export_csv_identifies_codes_and_gives_photos():
+    import io, csv
+    from PIL import Image, ImageDraw
+    from app.connectors import website
+    c = client()
+    c.post("/api/library/clear")
+    out = io.StringIO(); w = csv.writer(out)
+    w.writerow(["Handle", "Title", "Vendor", "Type", "Variant SKU", "Variant Barcode", "Image Src", "Image Position", "Image Alt Text"])
+    w.writerow(["cross-pen", "Cross Bailey Pen Black", "CROSS", "Pen", "CROSS_PEN_AT0452-7_2726", "'0012345678905", "https://cdn.shop/cross1.jpg", "1", ""])
+    w.writerow(["cross-pen", "", "", "", "", "", "https://cdn.shop/cross2.jpg", "2", ""])
+    w.writerow(["cross-pen", "", "", "", "", "", "https://cdn.shop/old-ai.jpg", "3", "Cross Bailey | Hero"])
+    w.writerow(["lamy-safari", "LAMY safari fountain pen", "LAMY", "Pen", "LAMY_FP_L14_2429", "", "https://cdn.shop/lamy1.jpg", "1", ""])
+    c.post("/api/library/upload", files=[("files", ("products_export.csv", out.getvalue().encode(), "text/csv"))])
+    wait_job(c)
+    def pic(u):
+        im = Image.new("RGB", (1400, 1400), (250, 250, 250)); col = (20, 20, 20) if "1" in u else (200, 30, 30)
+        ImageDraw.Draw(im).rectangle([300, 300, 1100, 1100] if "1" in u else [200, 500, 1200, 900], fill=col)
+        b = io.BytesIO(); im.save(b, "JPEG"); return b.getvalue()
+    od = website.download
+    website.download = pic
+    c.put("/api/admin/settings", json={"planner_on": True, "plan_review": "never", "use_websites": False})
+    try:
+        c.post("/api/library/codes", json={"text": "2726\n2429\n99999", "replace": True})
+        wait_job(c); assert c.post("/api/library/prepare").status_code == 200; wait_job(c, 60)
+    finally:
+        website.download = od
+    q = {i["code"]: i for i in c.get("/api/library").json()["lqueue"]}
+    assert q["2726"]["prep"]["state"] == "ready" and q["2726"]["prep"]["store_photos"] == 2, q["2726"]
+    assert q["2429"]["prep"]["state"] == "ready"
+    assert q["99999"]["prep"]["state"] == "not_found"

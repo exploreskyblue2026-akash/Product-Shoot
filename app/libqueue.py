@@ -150,7 +150,8 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
         # 2 photos: 1 our own SkyBlue store, 2 the brand's official website, plus every raw photo of this code
         has_store = s.scalar(select(LibImage.id).where(LibImage.key == it["key"], LibImage.source == "store")) is not None
         from .connectors import shopify as _shop
-        if not has_store and get_setting(s, "use_shopify", True) and get_setting(s, "store_first", True) and _shop.configured():
+        exported = bool(((lp.data or {}).get("store_images")))
+        if not has_store and get_setting(s, "store_first", True) and (exported or (get_setting(s, "use_shopify", True) and _shop.configured())):
             from .library import store_fetch
             s.commit()
             try:
@@ -162,7 +163,7 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
             except Exception as e:
                 s.rollback()
                 prep["store"] = f"store check failed: {str(e)[:100]}"
-        elif not has_store and not _shop.configured():
+        elif not has_store and not exported and not _shop.configured():
             prep["store"] = "store not connected"
         elif has_store:
             prep.setdefault("store", "found earlier")
