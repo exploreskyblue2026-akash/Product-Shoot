@@ -396,8 +396,17 @@ def add_files(s: Session, files: list[tuple[str, bytes]]) -> dict:
             idx = _index(s)
         elif low.endswith(".zip"):
             with zipfile.ZipFile(io.BytesIO(data)) as z:
-                for n in z.namelist():
-                    if n.lower().endswith(IMG_EXT) and not n.startswith("__MACOSX"):
+                names = [n for n in z.namelist() if not n.startswith("__MACOSX")]
+                for n in names:                              # sheets / store export first, so codes are known
+                    if n.lower().endswith(".csv"):
+                        r = import_store_csv(s, z.read(n), n)
+                        stats["sheets"].append(f"{n}: SkyBlue store export, {r['products']} products ({r['new']} new)")
+                        idx = _index(s)
+                    elif n.lower().endswith((".xlsx", ".xlsm")):
+                        stats["sheets"].append(add_sheet(s, z.read(n), n))
+                        idx = _index(s)
+                for n in names:
+                    if n.lower().endswith(IMG_EXT):
                         stats["images"] += bool(add_image(s, z.read(n), n, "file", idx=idx))
         elif low.endswith(".pdf"):
             stats["catalogue_images"] += add_catalogue(s, data, name, idx=focus_index(s, idx))

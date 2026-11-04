@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.6.0 (SkyBlue store export CSV: identifies codes + photos without the master sheet)"
+APP_VERSION = "4.6.1 (store export CSV inside a ZIP)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

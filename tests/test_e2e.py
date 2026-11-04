@@ -1237,3 +1237,21 @@ def test_store_export_csv_identifies_codes_and_gives_photos():
     assert q["2726"]["prep"]["state"] == "ready" and q["2726"]["prep"]["store_photos"] == 2, q["2726"]
     assert q["2429"]["prep"]["state"] == "ready"
     assert q["99999"]["prep"]["state"] == "not_found"
+
+
+def test_zip_with_store_export_csv():
+    import io, csv, zipfile
+    c = client()
+    out = io.StringIO(); w = csv.writer(out)
+    w.writerow(["Handle", "Title", "Vendor", "Type", "Variant SKU", "Variant Barcode", "Image Src", "Image Position", "Image Alt Text"])
+    w.writerow(["zip-pen", "Zip Pen", "PARKER", "Pen", "PARKER_PEN_ZP1_9558", "", "https://cdn.shop/z1.jpg", "1", ""])
+    zb = io.BytesIO()
+    with zipfile.ZipFile(zb, "w") as z:
+        z.writestr("products_export_1.csv", out.getvalue())
+    c.post("/api/library/upload", files=[("files", ("export.zip", zb.getvalue(), "application/zip"))])
+    st = wait_job(c)
+    assert "store export" in st["job"]["msg"]
+    from app.db import SessionLocal, LibProduct
+    from sqlalchemy import select
+    with SessionLocal() as s:
+        assert s.scalar(select(LibProduct).where(LibProduct.item_code == "9558")).brand == "PARKER"
