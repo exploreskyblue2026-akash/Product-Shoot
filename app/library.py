@@ -76,7 +76,7 @@ def import_master(s: Session, data: bytes, filename: str = "master.xlsx") -> dic
             raw_pid = _cell(r, m.get("product_id"))
             pid = str(int(raw_pid)) if isinstance(raw_pid, float) and raw_pid.is_integer() else str(raw_pid).strip()
             item = norm(_cell(r, m.get("item_code")))
-            key = norm(pid) or item
+            key = (norm(pid) or item)[:80]
             if not key:
                 continue
             ean = norm(_cell(r, m.get("ean")))
@@ -94,9 +94,9 @@ def import_master(s: Session, data: bytes, filename: str = "master.xlsx") -> dic
             else:
                 updated += 1
             is_new = p.id is None
-            p.product_id = pid or p.product_id
-            p.item_code = item or p.item_code
-            p.ean = ean or p.ean
+            p.product_id = (pid or p.product_id)[:80]
+            p.item_code = (item or p.item_code)[:40]
+            p.ean = (ean or p.ean)[:40]
             extra = {}
             for ci, h in enumerate(head):
                 hl = str(h or "").strip().lower()
@@ -1213,25 +1213,25 @@ def import_store_csv(s: Session, data: bytes, filename: str = "products_export.c
         sku = d["skus"][0] if d["skus"] else ""
         parts = [x for x in re.split(r"[_\s]+", sku) if x]
         item = next((x for x in reversed(parts) if re.fullmatch(r"\d{3,7}", x)), "")
-        pid = parts[-2] if item and len(parts) >= 3 else (sku if not item else "")
-        ean = d["barcodes"][0] if d["barcodes"] else ""
+        pid = (parts[-2] if item and len(parts) >= 3 else (sku if not item else ""))[:80]
+        ean = (d["barcodes"][0] if d["barcodes"] else "")[:40]
         lp = None
         for c in (item, pid, ean):
             if c and norm(c) in idx:
                 lp = idx[norm(c)]
                 break
         if lp is None:
-            key = norm(pid) or norm(item) or norm(h)
+            key = (norm(pid) or norm(item) or norm(h))[:80]                  # database limits: never fail an import
             lp = s.scalar(select(LibProduct).where(LibProduct.key == key))
             if lp is None:
-                lp = LibProduct(key=key, product_id=pid or item or h, item_code=norm(item), name=d["title"][:300],
-                                brand=d["vendor"][:80], category=d["type"][:80], ean=norm(ean), data={})
+                lp = LibProduct(key=key, product_id=(pid or item or h)[:80], item_code=norm(item)[:40], name=d["title"][:300],
+                                brand=d["vendor"][:80], category=d["type"][:80], ean=norm(ean)[:40], data={})
                 s.add(lp)
                 added += 1
         else:
             linked += 1
-        lp.item_code = lp.item_code or norm(item)
-        lp.ean = lp.ean or norm(ean)
+        lp.item_code = (lp.item_code or norm(item))[:40]
+        lp.ean = (lp.ean or norm(ean))[:40]
         lp.name = lp.name or d["title"][:300]
         lp.brand = lp.brand or d["vendor"][:80]
         lp.data = {**(lp.data or {}), "store_images": imgs[:12], "store": {"title": d["title"], "handle": h, "matched_by": "store export"},

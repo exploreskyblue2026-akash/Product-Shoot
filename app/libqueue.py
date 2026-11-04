@@ -93,7 +93,7 @@ def _create_from_web(s: Session, code: str, bkey: str, facts: dict, b: dict) -> 
     key = norm(code)
     lp = s.scalar(select(LibProduct).where(LibProduct.key == key))
     if lp is None:
-        lp = LibProduct(key=key, product_id=code, name=facts.get("title") or code, brand=b.get("brand_name") or bkey,
+        lp = LibProduct(key=key[:80], product_id=code[:80], name=(facts.get("title") or code)[:300], brand=(b.get("brand_name") or bkey)[:80],
                         category="", ean=(facts.get("eans") or [""])[0] if len(facts.get("eans") or []) == 1 else "",
                         data={"created_from": "official website", "web": {k: facts.get(k) for k in
                               ("url", "title", "description", "dimensions", "verified_by")}})

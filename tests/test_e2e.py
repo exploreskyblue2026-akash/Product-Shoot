@@ -1255,3 +1255,16 @@ def test_zip_with_store_export_csv():
     from sqlalchemy import select
     with SessionLocal() as s:
         assert s.scalar(select(LibProduct).where(LibProduct.item_code == "9558")).brand == "PARKER"
+
+
+def test_store_export_with_very_long_codes_does_not_fail():
+    import io, csv
+    c = client()
+    out = io.StringIO(); w = csv.writer(out)
+    w.writerow(["Handle", "Title", "Vendor", "Type", "Variant SKU", "Variant Barcode", "Image Src", "Image Position", "Image Alt Text"])
+    long = "SET_" + "VERYLONGCOMBOCODE" * 8
+    w.writerow(["h-" + "x" * 150, "Long one", "V" * 120, "T" * 120, long, "1" * 60, "https://cdn.shop/l1.jpg", "1", ""])
+    w.writerow(["ok-pen", "Ok Pen", "LAMY", "Pen", "LAMY_PEN_L1_8480", "", "https://cdn.shop/o1.jpg", "1", ""])
+    c.post("/api/library/upload", files=[("files", ("products_export.csv", out.getvalue().encode(), "text/csv"))])
+    st = wait_job(c)
+    assert not st["job"]["error"] and "2 products" in st["job"]["msg"], st["job"]
