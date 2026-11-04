@@ -19,6 +19,15 @@ from sqlalchemy.orm import Session
 from .db import LibImage, LibProduct, get_setting, log, set_setting
 
 
+def _say(msg: str):
+    """Live progress on the Library page ('Preparing 3/10 · 2033 …')."""
+    try:
+        from .main import _lib_job
+        _lib_job["msg"] = "Preparing the Library queue · " + msg
+    except Exception:
+        pass
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="minutes")
 
@@ -104,9 +113,11 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
     use_web = get_setting(s, "use_websites", True)
     auto_send = get_setting(s, "auto_send_studio", False)
     idx = _index(s)
-    for it in items:
+    for n_it, it in enumerate(items, 1):
         if time.time() > deadline or (stop and stop()):
             break
+        if (it.get("prep") or {}).get("state") not in ("ready", "sent", "not_found"):
+            _say(f"{n_it}/{len(items)} · {it['code']}")
         prep = dict(it.get("prep") or {})
         if prep.get("state") in ("ready", "sent", "not_found"):
             continue
@@ -116,8 +127,10 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
             p, how = resolve(it["code"], idx)
             if p:
                 it["key"], it["match"] = p.key, how
-            elif use_web:
-                hit = _find_on_websites(s, it["code"], deadline)
+            elif use_web and not re.fullmatch(r"\d{1,7}", it["code"].strip().removesuffix(".0")):
+                # a short number is a SkyBlue item code: it only exists in the master sheet, never on brand websites
+                _say(f"{n_it}/{len(items)} · {it['code']}: searching the brand websites")
+                hit = _find_on_websites(s, it["code"], min(deadline, time.time() + 180))
                 if hit:
                     bkey, facts = hit
                     b = dict(_brands_with_site(s)).get(bkey, {})
@@ -125,12 +138,15 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
                     it["key"], it["match"] = lp.key, f"official website ({bkey})"
                     idx = _index(s)
             if not it.get("key"):
-                prep.update(state="not_found", why="Not in the master sheet and not found on any brand website")
+                short = re.fullmatch(r"\d{1,7}", it["code"].strip().removesuffix(".0"))
+                prep.update(state="not_found", why=("SkyBlue item code not in the master sheet: check the sheet's Item Code column"
+                                                    if short else "Not in the master sheet and not found on any brand website"))
                 it["prep"] = prep
                 continue
         lp = s.scalar(select(LibProduct).where(LibProduct.key == it["key"]))
         bkey, b = _brand_of(s, lp)
         prep["brand"] = b.get("brand_name") or lp.brand or bkey
+        _say(f"{n_it}/{len(items)} · {it['code']} ({prep['brand']}): photos, then analysis")
         # 2 photos: 1 our own SkyBlue store, 2 the brand's official website, plus every raw photo of this code
         has_store = s.scalar(select(LibImage.id).where(LibImage.key == it["key"], LibImage.source == "store")) is not None
         from .connectors import shopify as _shop
