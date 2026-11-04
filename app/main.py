@@ -850,7 +850,7 @@ def _auto_prepare(s, r):
     """After new files or a code sheet: prepare waiting codes straight away (website first, analysis, ready)."""
     from . import libqueue
     try:                                                # unmatched photos: ladder + brand-website bridge, every time
-        rm = library.rematch_unmatched(s, grow=True)
+        rm = library.rematch_unmatched(s, grow=False)   # quick: never reads websites after an upload
         if rm["matched"]:
             r = f"{r} · {rm['matched']} unmatched photo(s) filed"
     except Exception as e:
