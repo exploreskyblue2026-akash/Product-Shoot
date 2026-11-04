@@ -657,7 +657,15 @@ def run_forever():
         except Exception:
             traceback.print_exc()
             worked = False
-        time.sleep(0.2 if worked else config.WORKER_INTERVAL)
+        if worked:
+            config.touch()                              # still generating: stay active
+            time.sleep(0.2)
+        elif config.idle():
+            time.sleep(60)                              # sleeps here; the database is not touched below
+            while config.idle():
+                time.sleep(30)
+        else:
+            time.sleep(config.WORKER_INTERVAL)
 
 
 def start_background():

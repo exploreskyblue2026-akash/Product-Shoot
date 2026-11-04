@@ -57,6 +57,13 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="Skyblue Product Studio", docs_url="/api/docs", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def _activity(request: Request, call_next):
+    if not request.url.path.startswith("/api/health"):
+        config.touch()                              # a person is using the tool
+    return await call_next(request)
 app.add_middleware(SessionMiddleware, secret_key=config.SECRET_KEY, same_site="lax",
                    https_only=config.env("COOKIE_SECURE", "true") == "true", max_age=60 * 60 * 24 * 14)
 
@@ -114,7 +121,7 @@ def health():
     from .connectors import mirror
     db = "postgres (permanent)" if config.DATABASE_URL.startswith("postgresql") else "sqlite (wiped on redeploy)"
     return {"ok": True, "version": config.APP_VERSION, "provider": config.PROVIDER, "worker": config.RUN_WORKER,
-            "database": db, "file_mirror": mirror.enabled(), "mirror_pending": mirror.pending(),
+            "database": db, "mirror_pending": mirror.pending(), "idle": config.idle(),
             "vision_model": config.model_name(config.MODEL_VISION)}
 
 
@@ -1629,6 +1636,8 @@ def _autoscan_loop():
     while True:
         _t.sleep(300)
         try:
+            if config.idle():
+                continue                                 # nobody here: let the database sleep
             with SessionLocal() as s:
                 link = get_setting(s, "library_drive_link", "")
                 on = get_setting(s, "library_autoscan", True) and get_setting(s, "use_drive", True)

@@ -119,6 +119,9 @@ def sweep_forever(every: int = 300):
     from ..db import FileMirror, SessionLocal
     while True:
         time.sleep(every)
+        from .. import config as _cfg
+        if _cfg.idle():
+            continue                                    # nobody here: let the database sleep
         try:
             if not enabled():
                 continue

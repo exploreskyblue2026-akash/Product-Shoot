@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.6.4 (uploads never wait on website reading)"
+APP_VERSION = "4.7.0 (idle mode: database can sleep when nobody uses the tool)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
@@ -92,3 +92,18 @@ def model_name(name: str) -> str:
     if n.startswith(("gemini-2.", "gemini-1.")):          # any retired 1.x / 2.x name, incl. -preview / -001 variants
         return "gemini-nano-banana-2.1" if "image" in n else "gemini-3.8-flash"
     return n
+
+
+# ---- idle detection: when nobody uses the tool, background work stops touching the database, so the
+# database (Neon) can go to sleep and does not burn its monthly compute quota.
+import time as _time
+LAST_ACTIVITY = {"t": _time.time()}
+IDLE_AFTER = float(env("IDLE_AFTER", "900"))          # 15 minutes without a signed-in request = idle
+
+
+def touch():
+    LAST_ACTIVITY["t"] = _time.time()
+
+
+def idle() -> bool:
+    return _time.time() - LAST_ACTIVITY["t"] > IDLE_AFTER
