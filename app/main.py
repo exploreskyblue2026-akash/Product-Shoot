@@ -666,7 +666,7 @@ SETTING_KEYS = ["engine_mode", "library_autoscan", "library_focus", "library_dri
                 "model_other", "file_naming", "min_raw_px", "output_drive_folder", "cost_mode", "default_shots",
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr",
                 "model_hero", "model_detail", "model_use_case", "model_lifestyle", "escalate_model",
-                "planner_on", "plan_review", "model_planner", "static_rules", "hero_review",
+                "planner_on", "plan_review", "model_planner", "static_rules", "house_look", "hero_review",
                 "use_openrouter", "use_shopify", "use_drive", "use_websites", "auto_prepare", "auto_send_studio", "store_first"]
 
 
@@ -676,6 +676,8 @@ def get_settings(u=Depends(need("admin"))):
     with SessionLocal() as s:
         out = {k: get_setting(s, k) for k in SETTING_KEYS}
         out["static_rules"] = static_rules(s)
+        from .planner import house_look
+        out["house_look"] = house_look(s)
         out["planner_on"] = get_setting(s, "planner_on", True)
         out["plan_review"] = get_setting(s, "plan_review", "flagged")
         for k, d in (("use_openrouter", False), ("use_shopify", True), ("use_drive", True), ("use_websites", True)):
@@ -940,9 +942,10 @@ def library_retry(body: CodesIn, u=Depends(need("editor"))):
 
 @app.get("/api/library")
 def library_state(u=Depends(need("viewer"))):
+    job = dict(_lib_job)                    # read first: a job that is finished here is in the data below
     with SessionLocal() as s:
         r = library.report(s)
-        r["job"] = dict(_lib_job)
+        r["job"] = job
         r["drive_link"] = get_setting(s, "library_drive_link", "")
         r["cutouts_folder"] = bool(get_setting(s, "cutouts_drive_folder", ""))
         r["lqueue"] = [{k: it.get(k) for k in ("code", "key", "match", "prep", "priority")}

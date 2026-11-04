@@ -21,6 +21,14 @@ from .db import LibImage, LibProduct, Setting, get_setting, log
 SHOTS = ("hero", "detail", "use_case", "lifestyle")
 SHOT_TITLE = {"hero": "1 · HERO", "detail": "2 · DETAIL", "use_case": "3 · USE CASE", "lifestyle": "4 · LIFESTYLE"}
 
+DEFAULT_LOOK = """One studio session for every image: the same light set-up, colour and finish in all shots of all products.
+Key light: one large soft box at the upper left, about 45 degrees above and to the side; soft white fill from the right; light ratio about 2:1.
+Shadows: soft, feathered contact shadow falling to the lower right; no hard edges, no double shadows, no dark pools.
+Colour: neutral daylight white balance (about 5200 K), true-to-life product colours, no colour cast, no filters, no grading, no vignetting.
+Exposure and contrast: bright, clean exposure with gentle contrast; highlights never clipped; blacks keep detail.
+Never: direct sunlight, sun patches or window light streaks, harsh spotlights, coloured gels, neon or mixed light colours.
+Reflective parts (metal, gloss, glass): smooth soft-box reflections that show the shape; no hot spots or glare."""
+
 DEFAULT_STATIC = """Listing image, 4:5 vertical, 1200 x 1500 px.
 Soft, diffused studio light only: no direct sun, no hard light, no harsh or sharp shadows, no glare, no hot spots.
 Never show studio equipment: no lights, softboxes, stands or reflectors anywhere in the frame. The light looks studio-made, the equipment is never seen.
@@ -55,13 +63,19 @@ SCHEMA = {
     "shots": {k: {"goal": "", "scene": "the real place, e.g. kid's study desk by a window",
                   "surface": "material + colour + texture, e.g. pale oak desk, fine grain",
                   "backdrop": "what is behind, e.g. plain warm-white wall, softly out of focus",
-                  "camera": "angle + lens feel", "composition": "product position + % of frame + negative space",
+                  "camera": "angle, e.g. 30 degrees above, three-quarter front", "lens": "e.g. 85 mm product lens look",
+                  "depth_of_field": "e.g. product fully sharp, background softly out of focus",
+                  "orientation": "how the product lies / stands and which face points to the camera",
+                  "composition": "product position + % of frame + negative space",
                   "props": [{"item": "e.g. spiral sketchbook", "material": "", "colour": "", "size_vs_product": "e.g. 2x longer",
                              "position": "e.g. back-left, half out of frame, out of focus", "why": "why it belongs with this product"}],
                   "hands": "none or who/how", "product_state": "", "light": "direction, softness, how reflective parts look",
                   "notes": "",
                   "reference_photo": "index of the photo the image model should copy for this shot"}
               for k in SHOTS},
+    "look": {"backdrop_family": "one colour family for all 4 shots, e.g. warm off-white and pale oak",
+             "palette": "3-4 colours (hex) that the set and props stay within, chosen from the brand palette and the product",
+             "mood": "e.g. calm, bright, playful school morning", "material_rendering": "how this product's materials must look under the house light"},
     "best_reference": "index of the ONE photo that shows the whole single product most clearly (shape, colour, clip, logo)",
     "self_check": ["each studio rule you checked the plans against and what you changed"],
     "review_needed": False,
@@ -93,6 +107,10 @@ Do this in order and return ONE JSON object exactly in the schema at the end:
    feature in a way that explains it (e.g. a fountain-pen nib writing, a multi-tool opened out, the tips of a colour set in
    order). USE CASE shows the right user using it in the right place (hands only if they fit the use and the brand allows).
    LIFESTYLE shows its world, wider, in the brand mood. Only plan angles and parts the photos actually show.
+   ONE LOOK: all 4 shots of this product (and every product of this brand) must look like ONE studio session. The
+   light set-up, colour temperature and finish are fixed by the HOUSE LOOK below and must never change between shots.
+   Choose in "look" one backdrop family, a 3-4 colour palette (from the brand palette and the product) and a mood that
+   every shot keeps. Only the set, props, camera angle and the product's orientation change from shot to shot.
    SET DESIGN for every shot, like a real in-house photographer: a specific surface (material, colour, texture) and
    backdrop that suit the product's category, user and the brand palette; 1-3 props for the hero (more for lifestyle),
    each a real, plain, unbranded object with its material, colour, real size compared with the product, exact position
@@ -108,6 +126,9 @@ Do this in order and return ONE JSON object exactly in the schema at the end:
    only if it shows the planned feature).
 10. review_needed = true when the photos are unclear, contradictory, show several products, or the product is hard to
    reproduce (fine text, complex pattern, many items); say why in review_reason.
+
+HOUSE LOOK (fixed for every image):
+{look}
 
 STUDIO RULES (always):
 {static}
@@ -126,6 +147,10 @@ SCHEMA (return JSON only, no markdown):
 
 
 # ---------------------------------------------------------------- inputs
+def house_look(s: Session) -> str:
+    return (get_setting(s, "house_look", "") or "").strip() or DEFAULT_LOOK
+
+
 def static_rules(s: Session) -> str:
     own = (get_setting(s, "static_rules", "") or "").strip()     # edited in Admin -> Autopilot rules
     if own:
@@ -191,10 +216,12 @@ def make_plan(s: Session, key: str, prov, charge=None) -> dict:
              "skyblue_store": {"title": (ld.get("store") or {}).get("title", ""), "description": ld.get("store_description", "")}}
     busy = any(w in (lp.name or "").lower() for w in ("set", " x", "pack", "assorted", "colours", "colors"))
     prompt = INSTRUCTIONS.format(hero_props="0-1 small props, the set itself is busy" if busy else "1-3 small props at the edges",
-                                 static=static_rules(s), shot_rules=_shot_rules(s), brand=brand_txt,
+                                 look=house_look(s), static=static_rules(s), shot_rules=_shot_rules(s), brand=brand_txt,
                                  facts=json.dumps(facts, ensure_ascii=False), schema=json.dumps(SCHEMA, ensure_ascii=False))
     model = (get_setting(s, "model_planner", "") or "").strip()
     plan, used = prov.plan_product([storage.read(i.path) for i in imgs], prompt, model)
+    _, bd = _brand(s, lp)
+    plan["_brand"] = {k: bd.get(k) for k in ("brand_name", "palette_hex", "hero_backdrop", "mood_override") if bd.get(k)}
     if charge:
         from . import config
         charge(used)
@@ -284,7 +311,7 @@ def _prop(x) -> str:
     return " - ".join(b for b in bits if b)
 
 
-def render(plan: dict, kind: str, static: str, anchored: bool, approved_facts: str = "") -> str:
+def render(plan: dict, kind: str, static: str, anchored: bool, approved_facts: str = "", look: str = "") -> str:
     """Labelled plain-English sections, most important first. The image model never sees raw JSON."""
     ap, idn, sh = plan.get("appearance") or {}, plan.get("identity") or {}, (plan.get("shots") or {}).get(kind) or {}
     texts = [f'"{t["text"]}" ({t.get("where", "")})' if isinstance(t, dict) else f'"{t}"' for t in ap.get("printed_text") or []]
@@ -317,8 +344,16 @@ def render(plan: dict, kind: str, static: str, anchored: bool, approved_facts: s
         f"SET: {sh.get('scene', '')}. Surface: {sh.get('surface', '')}."
         + (f" Backdrop: {sh['backdrop']}." if sh.get("backdrop") else "")
         + f" Product: {sh.get('product_state', 'as in the photos')}.",
-        f"CAMERA & COMPOSITION: {sh.get('camera', '')}. {sh.get('composition', '')}.",
-        f"LIGHT: {sh.get('light') or 'soft diffused studio light from the upper left, gentle natural shadow'}.",
+        "CAMERA: " + ". ".join(x for x in (sh.get("camera"), sh.get("lens"), sh.get("depth_of_field")) if x) + ".",
+        f"PRODUCT ORIENTATION: {sh['orientation']}." if sh.get("orientation") else "",
+        f"COMPOSITION: {sh.get('composition', '')}.",
+        "STUDIO LOOK (identical in every image of this shoot): " + " ".join(x.strip() for x in (look or DEFAULT_LOOK).splitlines() if x.strip())
+        + (f" Backdrop family: {lk['backdrop_family']}." if (lk := plan.get("look") or {}).get("backdrop_family") else "")
+        + (f" Palette: {lk['palette']}." if lk.get("palette") else "")
+        + (f" Brand colours: {(plan.get('_brand') or {}).get('palette_hex')}." if (plan.get("_brand") or {}).get("palette_hex") else "")
+        + (f" Mood: {lk['mood']}." if lk.get("mood") else ""),
+        "LIGHT ON THIS PRODUCT: " + "; ".join(x for x in (lk.get("material_rendering"), sh.get("light")) if x) + "."
+        if (lk.get("material_rendering") or sh.get("light")) else "",
         ("PROPS (plain, unbranded, real scale, never covering the logo or print): " + "; ".join(_prop(x) for x in sh["props"]) + ".")
         if sh.get("props") else "",
         f"HANDS / PEOPLE: {sh['hands']}." if sh.get("hands") and str(sh["hands"]).lower() not in ("none", "no", "") else "HANDS / PEOPLE: none.",

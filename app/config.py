@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.4.0 (company master sheet link; SkyBlue store first, then brand website; replace old store images; no cost/price/stock stored)"
+APP_VERSION = "4.5.0 (one consistent house look across all shots and products; compact Library cards)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

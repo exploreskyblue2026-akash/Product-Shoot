@@ -388,7 +388,8 @@ def process(pid: int, only: list[int] | None = None):
                     from .dataset import memory_block
                     approved = memory_block(mem_ok).replace("[PRODUCT FACTS: reproduce exactly, these override anything else]",
                                                             "[PRODUCT FACTS approved by a person: these override anything else]")
-                spec = {**spec, "prompt": planner.render(plan, sh.kind, static, anchored=bool(hero_ref), approved_facts=approved)
+                spec = {**spec, "prompt": planner.render(plan, sh.kind, static, anchored=bool(hero_ref), approved_facts=approved,
+                                                         look=planner.house_look(s))
                         + (f"\n\nREVIEWER ADJUSTMENT (highest priority, never change the product): {spec['fill'].get('reviewer_note')}"
                            if (spec.get("fill") or {}).get("reviewer_note") else "")}
                 facts = planner.qc_facts(plan) + ("; " + facts if facts else "")

@@ -537,7 +537,7 @@ def test_product_memory_quality_gate_and_learning():
         mock.MockProvider.generate, mock.MockProvider.qc = og, oq
         c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
     assert seen and "PRODUCT FACTS" in seen[0] and "TROIKA" in seen[0]
-    watch = {r["code"]: r for r in c.get("/api/library").json()["rows"]}["PIP25/BL"]["memory"]["facts"]["watch"]
+    watch = next(r for r in c.get("/api/library").json()["rows"] if r["code"] == "PIP25/BL" and r["in_shoot"] and r["images"])["memory"]["facts"]["watch"]
     assert any("TROlKA" in w for w in watch)
 
 

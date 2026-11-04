@@ -255,7 +255,9 @@ class GeminiProvider:
             prompt += ("\nIMPORTANT: image 1 is our APPROVED HERO shot of this exact product. The product in image 2 must be "
                        "the identical product: same design, pattern and print placement, colours, logo and text. Any "
                        "redesign, re-drawn pattern, different colourway or different product shape fails shape_match "
-                       "and label_text. props_ok also fails if any prop shows a logo, a brand name or another product.")
+                       "and label_text. props_ok also fails if any prop shows a logo, a brand name or another product. "
+                       "soft_light also fails when the lighting or colour does not match the hero: a different light direction, "
+                       "colour temperature or contrast, direct sunlight, hard shadows or a colour cast.")
         if shot.get("facts"):
             prompt += ("\nVerify against these known PRODUCT FACTS (from the real product): " + shot["facts"] +
                        "\nlabel_text fails if any listed text is misspelt, missing or extra text was invented. "

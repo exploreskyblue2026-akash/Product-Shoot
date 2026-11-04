@@ -53,6 +53,7 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
 .kitrow img{width:100%;aspect-ratio:1;object-fit:contain;background:var(--sunk);border-radius:6px}.kitrow figcaption{font-size:12px;color:var(--muted)}
 .lq{width:100%;border-collapse:collapse;font-size:13px}.lq th,.lq td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}.lq th{font-size:12px;color:var(--muted)}
 .plan{border-top:1px solid var(--line);padding-top:8px}.plan summary{cursor:pointer;display:flex;gap:6px;align-items:center;font-size:13px;flex-wrap:wrap}
+.plan .sub{border:1px solid var(--line);border-radius:6px;padding:4px 8px;margin:4px 0}.plan .sub>summary{cursor:pointer;font-size:12.5px;font-weight:600}
 .plan dl{display:grid;grid-template-columns:96px 1fr;gap:4px 8px;font-size:12px;margin:8px 0}.plan dt{color:var(--muted)}.plan dd{margin:0}
 .plan .sh{border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12px;margin:4px 0}.plan .sh b{display:block;margin-bottom:2px}
 .plan textarea{width:100%;min-height:220px;font-family:var(--f-mono,monospace);font-size:11px}
@@ -174,16 +175,21 @@ function plan(r){const rec=r.plan;
   if(!rec)return `<div class="acts"><button class="btn sm primary" data-plan="${esc(r.key)}" type="button" title="Best model: checks the photos, understands the product, plans the 4 shots">Analyse &amp; plan (≈ ₹2-3, once)</button></div>`;
   const j=rec.json||{},flag=j.review_needed&&!rec.approved;
   const chip=rec.status!="ok"?["bad","No usable photos"]:rec.stale?["warn","Photos changed: re-analyse"]:rec.approved?["ok","Plan approved"]:flag?["warn","Needs your approval"]:["info","Planned"];
-  const ap=j.appearance||{},u=j.use||{},cat=j.category||{};
-  return `<details class="plan"${flag||rec.stale?" open":""}><summary><b>Analysis &amp; shot plan</b><span class="chip ${chip[0]}">${chip[1]}</span><span class="hint">${esc(rec.model||"")}</span></summary>
-    ${flag?`<div class="note">Why: ${esc(j.review_reason||"flagged by the analysis")}</div>`:""}
-    <dl><dt>Product</dt><dd>${esc(J(j.identity))}</dd><dt>Printed text</dt><dd>${esc(J(ap.printed_text))}</dd><dt>Logo</dt><dd>${esc(J(ap.logo))}</dd>
-    <dt>Colours</dt><dd>${esc(J(ap.colours))}</dd><dt>Material</dt><dd>${esc(J(ap.materials))} ${esc(ap.finish||"")}</dd><dt>Size</dt><dd>${esc((j.size||{}).dimensions||"")}${(j.size||{}).estimated?" (estimated)":""}${(j.size||{}).scale_hint?" · "+esc(j.size.scale_hint):""}</dd>
-    <dt>User &amp; use</dt><dd>${esc(J(u))}</dd><dt>Setting</dt><dd>${esc(cat.environment||"")} · ${esc(cat.mood||"")}</dd>
-    <dt>Key features</dt><dd>${esc(J(j.hero_features))}</dd><dt>Risks</dt><dd>${esc(J(j.risks))}</dd><dt>Must keep</dt><dd>${esc(J(j.must_keep))}</dd></dl>
-    ${Object.entries(j.shots||{}).map(([k,s])=>`<div class="sh"><b>${SHN[k]||esc(k)}</b>${esc(s.goal||"")} · ${esc(s.scene||"")} on ${esc(s.surface||"")} · ${esc(s.camera||"")} · ${esc(s.composition||"")}<br>Props: ${esc(J(s.props))}${s.hands&&s.hands!="none"?` · Hands: ${esc(s.hands)}`:""}</div>`).join("")}
-    <details><summary class="hint">Edit plan (JSON)</summary><textarea data-pj="${esc(r.key)}" spellcheck="false">${esc(JSON.stringify(j,null,1))}</textarea><div class="acts"><button class="btn sm" data-psave="${esc(r.key)}" type="button">Save edits</button></div></details>
-    <div class="acts">${rec.approved?`<button class="btn sm" data-papprove="0" data-key="${esc(r.key)}" type="button">Un-approve</button>`:`<button class="btn sm primary" data-papprove="1" data-key="${esc(r.key)}" type="button">✓ Approve plan</button>`}<button class="btn sm" data-plan="${esc(r.key)}" type="button">Re-analyse</button></div></details>`}
+  const ap=j.appearance||{},u=j.use||{},cat=j.category||{},lk=j.look||{},idn=j.identity||{};
+  const one=[idn.type,(cat.environment||"")].filter(Boolean).join(" · ");
+  const sub=(title,body)=>`<details class="sub"><summary>${title}</summary>${body}</details>`;
+  return `<div class="plan"><div class="row" style="justify-content:space-between;gap:6px"><b>Analysis &amp; shot plan</b><span class="chip ${chip[0]}">${chip[1]}</span></div>
+    <div class="hint" style="margin:4px 0">${esc(one)}${rec.model?` · ${esc(rec.model)}`:""}</div>
+    ${flag?`<div class="note">Why it needs you: ${esc(j.review_reason||"flagged by the analysis")}</div>`:""}
+    ${sub("Product understanding",`<dl><dt>Product</dt><dd>${esc(J(j.identity))}</dd><dt>Printed text</dt><dd>${esc(J(ap.printed_text))}</dd><dt>Logo</dt><dd>${esc(J(ap.logo))}</dd>
+      <dt>Colours</dt><dd>${esc(J(ap.colours))}</dd><dt>Material</dt><dd>${esc(J(ap.materials))} ${esc(ap.finish||"")}</dd>
+      <dt>Size</dt><dd>${esc((j.size||{}).dimensions||"")}${(j.size||{}).estimated?" (estimated)":""}${(j.size||{}).scale_hint?" · "+esc(j.size.scale_hint):""}</dd>
+      <dt>User &amp; use</dt><dd>${esc(J(u))}</dd><dt>Setting</dt><dd>${esc(cat.environment||"")} · ${esc(cat.mood||"")}</dd>
+      <dt>Key features</dt><dd>${esc(J(j.hero_features))}</dd><dt>Risks</dt><dd>${esc(J(j.risks))}</dd><dt>Must keep</dt><dd>${esc(J(j.must_keep))}</dd></dl>`)}
+    ${lk.backdrop_family||lk.palette?sub("Look (same in all 4 shots)",`<dl><dt>Backdrop</dt><dd>${esc(lk.backdrop_family||"")}</dd><dt>Palette</dt><dd>${esc(lk.palette||"")}</dd><dt>Mood</dt><dd>${esc(lk.mood||"")}</dd><dt>Materials</dt><dd>${esc(lk.material_rendering||"")}</dd></dl>`):""}
+    ${sub("Shot plans (4)",Object.entries(j.shots||{}).map(([k,s])=>`<div class="sh"><b>${SHN[k]||esc(k)}</b>${esc(s.goal||"")}<br><span class="hint">Set:</span> ${esc(s.scene||"")} · ${esc(s.surface||"")}${s.backdrop?" · "+esc(s.backdrop):""}<br><span class="hint">Camera:</span> ${esc([s.camera,s.lens,s.orientation].filter(Boolean).join(" · "))}<br><span class="hint">Props:</span> ${esc(J(s.props))}${s.hands&&s.hands!="none"?`<br><span class="hint">Hands:</span> ${esc(s.hands)}`:""}</div>`).join(""))}
+    ${sub("Edit plan (JSON)",`<textarea data-pj="${esc(r.key)}" spellcheck="false">${esc(JSON.stringify(j,null,1))}</textarea><div class="acts"><button class="btn sm" data-psave="${esc(r.key)}" type="button">Save edits</button></div>`)}
+    <div class="acts" style="margin-top:6px">${rec.approved?`<button class="btn sm" data-papprove="0" data-key="${esc(r.key)}" type="button">Un-approve</button>`:`<button class="btn sm primary" data-papprove="1" data-key="${esc(r.key)}" type="button">✓ Approve plan</button>`}<button class="btn sm" data-plan="${esc(r.key)}" type="button">Re-analyse</button></div></div>`}
 function photos(r){const a=r.all||[];if(!a.length)return "";
   return `<details class="plan"><summary><b>Photos in this cluster</b><span class="chip mute">${a.length}</span></summary><div class="disc">${a.map(i=>`<figure><a href="${esc(i.src)}" target="_blank" rel="noopener"><img src="${esc(i.src)}" alt="" style="opacity:1"></a><figcaption>${i.primary?"<b>main</b> · ":""}${esc(i.angle||"no angle")}<br>${i.w}×${i.h} · ${esc(i.source)}${i.match?`<br>filed by: ${esc(i.match)}`:""}${i.web?`<br><a href="${esc(i.web)}" target="_blank" rel="noopener">official image</a>`:""}${i.sharpness!=null?`<br>sharpness ${esc(i.sharpness)}`:""}${i.flags&&i.flags.length?`<br>⚠ ${esc(i.flags.join(", "))}`:""}<br><span title="${esc(i.name)}">${esc((i.name||"").split("/").pop().slice(0,24))}</span></figcaption><button class="btn sm danger" data-act="not_product" data-id="${i.id}" type="button">Not this product</button></figure>`).join("")}</div></details>`}
 function disc(r){const d=r.discarded||[];if(!d.length)return "";
