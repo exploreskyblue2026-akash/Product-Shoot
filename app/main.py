@@ -42,11 +42,30 @@ def _keep_awake():
             print(f"[keep-awake] ping failed: {str(e)[:120]}")
 
 
+def _adopt_shoot_rules_v4(s):
+    """One time: the approved v4 shoot rules (house look + studio rules) replace older Admin-edited text; the old text is
+    kept under *_before_v4 so nothing is lost. Plans made with the old rules are marked stale so they are redone."""
+    from .db import get_setting, set_setting, LibProduct
+    if get_setting(s, "shoot_rules_version", 0) >= 4:
+        return
+    for k in ("static_rules", "house_look"):
+        old = (get_setting(s, k, "") or "").strip()
+        if old:
+            set_setting(s, f"{k}_before_v4", old)
+            set_setting(s, k, "")
+    for lp in s.query(LibProduct).all():
+        if (lp.data or {}).get("plan"):
+            lp.data = {**lp.data, "plan": {**lp.data["plan"], "stale": True}}
+    set_setting(s, "shoot_rules_version", 4)
+    s.commit()
+
+
 @asynccontextmanager
 async def lifespan(_app):
     init_db()
     with SessionLocal() as s:
         seed(s, config.OWNER_EMAIL.lower(), hash_pw(config.OWNER_PASSWORD))
+        _adopt_shoot_rules_v4(s)
     if config.RUN_WORKER:
         pipeline.start_background()
         import threading

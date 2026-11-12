@@ -12,7 +12,7 @@ from .dataset import build_prompts, library, live_rules, split
 from .db import SessionLocal, Product, Shot, Source, Usage, get_setting, log, now
 from .providers import get_provider
 
-SHOT_NAMES = {1: "hero", 2: "detail", 3: "use_case", 4: "lifestyle"}      # 4 shots: arrangement dropped for accuracy
+SHOT_NAMES = {1: "hero", 2: "lifestyle", 3: "use_case", 4: "detail"}      # listing order: hero, lifestyle, use case, detail/feature
 _lock = threading.Lock()
 STOP = threading.Event()          # set by the Stop button: finish nothing new, stop between attempts
 
@@ -256,7 +256,7 @@ def process(pid: int, only: list[int] | None = None):
                 p.shots.append(shots[no])
         s.commit()
         notes = {sh.no: sh.note for sh in shots.values() if sh.note}
-        prompts = {x["no"]: x for x in build_prompts(s, p, p.analysis or {}, rv, notes)}
+        prompts = _by_kind(build_prompts(s, p, p.analysis or {}, rv, notes), shots)
         retries = int(get_setting(s, "retries", 0))
         qc_mode = get_setting(s, "qc_mode", "light")
         cap = float(get_setting(s, "max_cost_product", 0.30))
@@ -270,6 +270,7 @@ def process(pid: int, only: list[int] | None = None):
         accurate = bool((p.data or {}).get("lib_key")) and get_setting(s, "engine_mode", "accurate") == "accurate"
         angle_raw = {}
         plan = None
+        plan_rec = None
         kept, plan_refs = [], {}
         if (p.data or {}).get("lib_key"):
             from . import library as lib
@@ -288,11 +289,12 @@ def process(pid: int, only: list[int] | None = None):
                     return
                 if planner.needs_review(s, rec):
                     p.stage = "plan"
-                    p.error = "Shot plan needs your approval in the Library: " + ((rec.get("json") or {}).get("review_reason") or "flagged by the analysis")
+                    p.error = "Shot plan needs your approval in the Library: " + planner.review_reason(rec)
                     p.data = {k: v for k, v in (p.data or {}).items() if k not in ("run_now", "only_shots")}
                     s.commit()
                     return
                 plan = rec["json"]
+                plan_rec = rec
                 static = planner.static_rules(s)
             if lp is not None and plan is None and not ((lp.data or {}).get("memory") or {}).get("facts"):
                 try:                                       # study once (≈ ₹0.3), reused for every future shoot
@@ -324,7 +326,7 @@ def process(pid: int, only: list[int] | None = None):
                 if best:
                     kept = [best] + [k for k in kept if k != best]
                 plan_refs = {k: _rel(((plan.get("shots") or {}).get(k) or {}).get("reference_photo")) for k in SHOT_NAMES.values()}
-            prompts = {x["no"]: x for x in build_prompts(s, p, p.analysis or {}, rv, notes)}   # now with product facts
+            prompts = _by_kind(build_prompts(s, p, p.analysis or {}, rv, notes), shots)   # now with product facts
         refs = []
         ref_paths = ((p.data or {}).get("refs") or [])[1:]
         if angle_raw:                                     # only verified (not discarded) photos of this exact code
@@ -343,6 +345,11 @@ def process(pid: int, only: list[int] | None = None):
             sh.status, sh.prompt, sh.model, sh.rule_version, sh.qc = "gen", spec["prompt"], model, rv.version, {}
             s.commit()
             prompt = spec["prompt"]
+            override = (((p.data or {}).get("prompt_override") or {}).get(str(no)) or "").strip()
+            if plan_rec is not None and not override and get_setting(s, "reuse_inputs", True):
+                done = _reuse_input(s, p, sh, plan_rec, prov, model, size, rv, qc_mode)
+                if done:
+                    continue
             shot_raw = raw
             main_rel = p.raw_path
             if kept:                                          # verified photos of this exact code only
@@ -524,6 +531,67 @@ def process(pid: int, only: list[int] | None = None):
                 stop_reason = "Hero failed QC, other shots not generated (saves credits)"
                 break
         _finish(s, p, stop_reason)
+
+
+def _by_kind(specs: list[dict], shots: dict) -> dict:
+    """Rule-sheet prompts are matched to our slots by kind (the slot order changed; the rule sheet keeps its own numbers)."""
+    kind_of = {no: sh.kind for no, sh in shots.items()}
+    by_kind = {x.get("kind"): x for x in specs}
+    out = {}
+    for no, kind in kind_of.items():
+        spec = by_kind.get(kind) or next((x for x in specs if x.get("no") == no), None)
+        if spec is not None:
+            out[no] = {**spec, "no": no}
+    return out
+
+
+def _reuse_input(s: Session, p: Product, sh: Shot, rec: dict, prov, model: str, size: str, rv, qc_mode: str) -> bool:
+    """Input-image triage: a supplied photo that already fits this slot is used as-is (crop / resize to 1200x1500, no
+    credits) or after a small preserving edit (cheap). Returns True when the slot is filled this way."""
+    from . import planner
+    from .library import LibImage
+    pick = planner.reuse_for(rec, sh.kind)
+    if not pick:
+        return False
+    img = s.get(LibImage, pick["image_id"])
+    if img is None or min(img.w or 0, img.h or 0) < int(get_setting(s, "reuse_min_px", 1000)):
+        return False
+    try:
+        data = storage.read(img.path)
+    except Exception:
+        return False
+    sh.attempts = (sh.attempts or 0) + 1
+    if pick["verdict"] == "edit" and pick["edits"]:
+        edit_model = (get_setting(s, "model_edit", "") or "").strip() or model
+        prompt = planner.EDIT_PROMPT.format(edits="\n".join(f"- {e}" for e in pick["edits"]))
+        try:
+            out = storage.to_output(prov.generate(prompt, data, edit_model, size, refs=[], style=None))
+        except Exception as e:
+            print(f"[pipeline] light edit failed for {p.code} {sh.kind}: {e}")
+            return False
+        used = getattr(prov, "last_model", None) or edit_model
+        _charge(s, p, "image", used, config.image_cost(used, size), sh)
+        how = {"method": "light_edit", "source": img.path, "edits": pick["edits"]}
+        try:
+            result = prov.qc(_sheet([data]), out, {"kind": sh.kind, "no": sh.no, "facts": planner.qc_facts(rec.get("json") or {}),
+                                                   "sheet": True, "vs_hero": False}, rv.data)
+            _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
+            status = "pass" if _passed(result, qc_mode) else "fail"
+        except Exception as e:
+            result, status = {"checks": {}, "reasons": {"qc": f"Automatic QC unavailable: {str(e)[:200]}"}, "unchecked": True}, "unchecked"
+        sh.prompt, sh.model = prompt, used
+    else:
+        out = storage.to_output(data)                       # 4:5, 1200x1500, compressed: no credits
+        how = {"method": "reused", "source": img.path, "exact": True}
+        result, status = {"checks": {"product_exact": True}, "reasons": {}}, "pass"
+        sh.prompt, sh.model = f"Input photo used as-is ({pick['why']})", "none"
+    result["how"] = how
+    result["sent"] = {"photos": [img.path], "reused": pick["verdict"], "why": pick["why"]}
+    sh.image_path = storage.save(f"shots/{storage.safe(p.code)}/{sh.no}-{sh.kind}-a{sh.attempts}.jpg", out)
+    sh.qc, sh.status, sh.note = result, status, ""
+    s.commit()
+    log(s, "pipeline", f"{p.code} {sh.kind}: {'input photo used as-is' if how['method'] == 'reused' else 'input photo with a small edit'}")
+    return True
 
 
 def _finish(s: Session, p: Product, stop_reason: str):

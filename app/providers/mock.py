@@ -22,7 +22,9 @@ class MockProvider:
         for n, m in enumerate(means):
             far = sum(abs(a - b) for a, b in zip(m, means[0])) > 150
             photos.append({"index": n, "is_this_product": not far, "usable": True, "angle": "front" if n == 0 else "angle",
-                           "reason_if_discarded": "different colourway" if far else ""})
+                           "reason_if_discarded": "different colourway" if far else "",
+                           "triage": ({"verdict": "use", "slot": "detail", "why": "mock: already a clean detail"}
+                                      if n == 0 and "REUSEME" in prompt else {"verdict": "reference", "slot": "none"})})
         shot = lambda k: {"goal": f"{k} goal", "scene": f"{k} scene", "surface": "light grey", "camera": "3/4, 85mm",  # noqa: E731
                           "composition": "centred, 60%", "props": ["plain pencil"], "hands": "child" if k == "use_case" else "none",
                           "product_state": "closed", "light": "soft", "notes": ""}
@@ -34,7 +36,10 @@ class MockProvider:
                 "use": {"purpose": "school", "user": "kids", "how_used": "on a desk", "hands": "child", "goes_with": ["pencils"]},
                 "category": {"name": "stationery", "environment": "kid's study desk", "prop_types": ["pencils"], "mood": "playful"},
                 "hero_features": ["print", "patch"], "risks": ["pattern redrawn"], "must_keep": ["MILAN patch", "doodle print"],
-                "shots": {k: shot(k) for k in ("hero", "detail", "use_case", "lifestyle")},
+                "shots": {k: shot(k) for k in ("hero", "lifestyle", "use_case", "detail")},
+                "checks": {"A1_facts": {"pass": True}, **{f"B{i}": True for i in range(1, 12)}},
+                "form": {"class": "boxy", "dimensions_mm": "200 x 130 x 60", "placement": "stands on its widest base",
+                         "hero_camera": "3/4 at 35 deg"},
                 "review_needed": "REVIEWME" in prompt, "review_reason": ""}
         return plan, model or "gemini-3-pro-mock"
 

@@ -1268,3 +1268,58 @@ def test_store_export_with_very_long_codes_does_not_fail():
     c.post("/api/library/upload", files=[("files", ("products_export.csv", out.getvalue().encode(), "text/csv"))])
     st = wait_job(c)
     assert not st["job"]["error"] and "2 products" in st["job"]["msg"], st["job"]
+
+
+def test_checkpoint_gate_and_input_reuse():
+    from app import planner
+    ok = {"checks": {"A1_facts": {"pass": True}, **{f"B{i}": True for i in range(1, 12)}}}
+    assert planner.gate(ok)["ok"]
+    bad_a = {"checks": {"A4_views": {"pass": False, "note": "no bottom view"}, **{f"B{i}": True for i in range(1, 12)}}}
+    g = planner.gate(bad_a)
+    assert not g["ok"] and "A4_views" in g["why"]
+    low_b = {"checks": {"A1_facts": {"pass": True}, **{f"B{i}": i > 3 for i in range(1, 12)}}}
+    assert not planner.gate(low_b)["ok"]                      # 8/11 < 9
+    assert planner.gate({})["ok"]                             # older plans still pass
+    rec = {"photos": [11, 12, 13], "json": {"photos": [
+        {"index": 0, "triage": {"verdict": "reference", "slot": "none"}},
+        {"index": 1, "triage": {"verdict": "edit", "slot": "detail", "edits": ["remove the 95gr icon"]}},
+        {"index": 2, "triage": {"verdict": "use", "slot": "detail", "why": "back cover text"}}]}}
+    assert planner.reuse_for(rec, "detail")["image_id"] == 13          # 'use' beats 'edit'
+    assert planner.reuse_for(rec, "hero") is None
+    assert list(planner.SHOTS) == ["hero", "lifestyle", "use_case", "detail"]
+    assert "top-down" in planner.SLOT_STATIC["hero"]
+
+
+def test_input_photo_reused_for_a_slot_without_generation():
+    import io, openpyxl
+    from PIL import Image, ImageDraw
+    c = client()
+    c.post("/api/library/clear")
+    c.put("/api/admin/settings", json={"engine_mode": "classic", "planner_on": True, "plan_review": "never",
+                                       "max_cost_product": 5, "daily_budget": 100, "hero_gate": False, "hero_review": False,
+                                       "retries": 0, "model_hero": "", "escalate_model": "", "reuse_inputs": True})
+    im = Image.new("RGB", (1600, 2000), (240, 236, 230)); ImageDraw.Draw(im).rectangle([500, 500, 1100, 1500], fill=(20, 60, 200))
+    b = io.BytesIO(); im.save(b, "JPEG", quality=95)
+    wb = openpyxl.Workbook(); ws = wb.active; ws.append(["SHOOT", "SHOTS"]); ws.append(["KR18/05/BR", "4"]); sb = io.BytesIO(); wb.save(sb)
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (Path(__file__).parent / "library" / "master.xlsx").read_bytes(), "x/y")),
+                                         ("files", ("re_shoot.xlsx", sb.getvalue(), "x/y")),
+                                         ("files", ("KR18-05-BR REUSEME.jpg", b.getvalue(), "image/jpeg"))])
+    wait_job(c)
+    try:
+        c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": True, "auto_approve": False})
+        c.post("/api/v2/load-shoot")
+        while pipeline.tick():
+            pass
+    finally:
+        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+    from app.db import SessionLocal, Product
+    from PIL import Image as _I
+    from app.connectors import storage as _st
+    with SessionLocal() as s:
+        pid = max((x for x in s.query(Product).all() if (x.data or {}).get("lib_key") == "KR1805BR"), key=lambda x: x.id).id
+    pipeline.process(pid, only=[4])                          # the shoot sheet of an earlier test may ask for shot 1 only
+    with SessionLocal() as s:
+        p = s.get(Product, pid)
+        det = next(sh for sh in p.shots if sh.no == 4)
+        assert det.kind == "detail" and (det.qc or {}).get("how", {}).get("method") == "reused"
+        assert _I.open(io.BytesIO(_st.read(det.image_path))).size == (1200, 1500)

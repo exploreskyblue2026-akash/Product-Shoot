@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.7.0 (idle mode: database can sleep when nobody uses the tool)"
+APP_VERSION = "4.8.0 (shoot rules v4: checkpoints, slot order, form-based camera, input photo reuse)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

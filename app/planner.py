@@ -18,37 +18,72 @@ from sqlalchemy.orm import Session
 from .connectors import storage
 from .db import LibImage, LibProduct, Setting, get_setting, log
 
-SHOTS = ("hero", "detail", "use_case", "lifestyle")
-SHOT_TITLE = {"hero": "1 · HERO", "detail": "2 · DETAIL", "use_case": "3 · USE CASE", "lifestyle": "4 · LIFESTYLE"}
+SHOTS = ("hero", "lifestyle", "use_case", "detail")            # listing order (approved 12 Nov 2026)
+SHOT_TITLE = {"hero": "1 · HERO", "lifestyle": "2 · LIFESTYLE", "use_case": "3 · USE CASE", "detail": "4 · DETAIL / FEATURE"}
+B_PASS = 9                                                     # scored checkpoints B1-B11: at least 9 must pass
 
-DEFAULT_LOOK = """One studio session for every image: the same light set-up, colour and finish in all shots of all products.
-Key light: one large soft box at the upper left, about 45 degrees above and to the side; soft white fill from the right; light ratio about 2:1.
-Shadows: soft, feathered contact shadow falling to the lower right; no hard edges, no double shadows, no dark pools.
-Colour: neutral daylight white balance (about 5200 K), true-to-life product colours, no colour cast, no filters, no grading, no vignetting.
-Exposure and contrast: bright, clean exposure with gentle contrast; highlights never clipped; blacks keep detail.
-Never: direct sunlight, sun patches or window light streaks, harsh spotlights, coloured gels, neon or mixed light colours.
-Reflective parts (metal, gloss, glass): smooth soft-box reflections that show the shape; no hot spots or glare."""
+# What each slot must do: fixed camera / framing rules (the dynamic plan fills in the rest).
+SLOT_STATIC = {
+    "hero": "HERO: the product itself, clean, premium, instantly readable. Camera direction from the product's form "
+            "(flat/thin -> straight top-down flat lay; long & thin -> top-down or high 60-75 deg; standing -> eye level or "
+            "low 3/4; boxy -> 3/4 at 30-45 deg; soft -> eye level). 85-100mm look (50-85mm for top-down), never wide angle. "
+            "Product 55-70% of the frame, at least 8% clean margin, nothing cropped, f/8-f/11 so the whole product is sharp. "
+            "One simple surface (plus a plain wall only when not top-down); no window, furniture edge or line through the "
+            "product. At most 2-3 small props at the edges, never overlapping the product.",
+    "lifestyle": "LIFESTYLE: the product in its owner's real world. 35-50mm look, product 30-45% of the frame and clearly "
+                 "the focus. A real moment, 3-5 props the owner really has, part of a person allowed (never a face). "
+                 "Background tells the place, softly out of focus.",
+    "use_case": "USE CASE: the main feature being used correctly. 50-100mm macro look. Hands of the right age, natural "
+                "grip, five fingers. The correct part touches the correct surface and the result of the action is "
+                "visible. Focus on the contact point; the product's label stays readable.",
+    "detail": "DETAIL / FEATURE: the key differentiator - a mechanism, a second function, what is inside or included, a "
+              "comparison, or a material when the material is the selling point. Not a plain zoom. 100mm macro look, "
+              "f/8 or more, an angle that explains the feature, show the feature AND its result. No decorative props.",
+}
 
-DEFAULT_STATIC = """Listing image, 4:5 vertical, 1200 x 1500 px.
-Soft, diffused studio light only: no direct sun, no hard light, no harsh or sharp shadows, no glare, no hot spots.
-Never show studio equipment: no lights, softboxes, stands or reflectors anywhere in the frame. The light looks studio-made, the equipment is never seen.
-Real physics: every object rests on a surface or is held naturally, with a real contact shadow. Nothing floats, hovers or sits at an impossible tilt.
-The product never changes: same shape, proportions, colours, materials, finish, pattern and its placement, every printed word, logo, hardware, item count and order as in the real photos.
-Show only what the photos show: never invent a side, an inside, a part or a feature that is not visible in the photos.
-Real-world scale: product and props at true relative size.
-The product is the hero: the sharpest, brightest and most important element, never cropped, at least 8% margin.
-Every shot has related props (the number varies by shot); never the bare product alone.
-Props are plain, unbranded, real everyday objects: no logos, no brand names, no text, no other products of any brand, no invented branded items, no logo stickers. Props never touch or cover the product's logo or print.
-No text, captions, watermarks or graphics anywhere except what is printed on the product.
-Hands, when used: natural, correct anatomy (five fingers, real nails), clean, age-appropriate for the user; hands never cover the logo or print.
-Colour truth: neutral white balance; the product's colours match the real photos with no colour cast.
-The 4 shots look like one photoshoot: same brand look and colour family.
-Clean, uncluttered backgrounds with gentle depth of field in scenes.
-Photographic realism: a real camera photograph, never a 3D render, illustration or obvious AI look."""
+DEFAULT_LOOK = """One photographer, one session: the same light, colour and finish in every image.
+Light: soft overcast daylight from a large window on the left (north-facing, never direct sun); clear direction with gentle falloff to the right and soft natural shading.
+Never: sun patches, light streaks, window or blind shadow patterns, hard shadows, spotlights, coloured light.
+Colour: neutral white balance (about 5200 K); whites stay white, no orange, peach or one-colour cast; muted, true-to-life grading.
+Materials: real textured surfaces with slight imperfection (plaster or limewash, stone, linen, paper with tooth, wood with grain); mix neutral tones, never one colour everywhere.
+Reflective parts: soft gradient highlights; never a reflected room, window or person."""
+
+DEFAULT_STATIC = """Listing image, 4:5 portrait, 1200 x 1500 px; main subject near the centre.
+A real photograph from a full-frame camera with natural fine grain; never a 3D render, illustration or obvious AI look.
+Perspective: verticals straight, horizon level, no wide-angle or fisheye distortion; top-down shots perfectly parallel to the surface.
+The product is the sharpest element in the frame.
+Real physics: every object rests, stands, leans or is held naturally with a real contact shadow; nothing floats, hovers, intersects or balances impossibly. A thin product lies flat; a standing product stands.
+The product never changes: same shape, proportions, colours, materials, pattern, every printed word, logo, hardware, item count and order as in the real photos.
+Show only what the photos show: never invent a side, an inside, a part or a mechanism.
+Correct use: the right end / part touches the right surface, held the way it is really used.
+Real-world scale between product and props.
+Props: plain, unbranded, real objects the product's owner really has; never other products of any brand; never looking like part of the product; never covering its logo or print.
+No text, captions, watermarks or graphics except what is printed on the product.
+Hands when used: right age for the user, natural grip, five fingers, real nails; never a face.
+Avoid: CGI-clean surfaces, showroom rooms, windows / door frames / table edges cutting the frame, stock AI props (trailing pothos, earbuds cases, pastel book stacks, latte cups) unless the audience calls for them.
+The 4 shots look like one photoshoot."""
 
 SCHEMA = {
     "photos": [{"index": 0, "is_this_product": True, "usable": True, "angle": "front|angle|side|back|top|detail|in_use|packaging|group",
-                "reason_if_discarded": ""}],
+                "reason_if_discarded": "",
+                "triage": {"verdict": "use|edit|reference|reject", "slot": "hero|lifestyle|use_case|detail|none",
+                           "edits": ["only for 'edit': small fixes, e.g. remove the '95gr' icon; soften harsh light"],
+                           "why": "one sentence"}}],
+    "checks": {"A1_facts": {"pass": True, "note": "sources read"}, "A2_features": {"pass": True, "note": ""},
+               "A3_how_used": {"pass": True, "note": ""}, "A4_views": {"pass": True, "note": "missing views, if any"},
+               "A5_text": {"pass": True, "note": ""}, "A6_in_box": {"pass": True, "note": "included vs props"},
+               "B1_user": True, "B2_world": True, "B3_props": True, "B4_scale": True, "B5_colours": True,
+               "B6_feature_map": True, "B7_angles": True, "B8_moments": True, "B9_market": True, "B10_safety": True,
+               "B11_form": True},
+    "form": {"class": "flat|long|standing|boxy|soft", "dimensions_mm": "W x H x D", "placement": "how it rests",
+             "hero_camera": "e.g. straight top-down 90 deg", "informative_face": "which face carries the label / print",
+             "reflective": False},
+    "features": [{"name": "e.g. eraser (top)", "how_used": "which part touches what, grip, visible result",
+                  "slot": "hero|lifestyle|use_case|detail"}],
+    "in_the_box": ["what is sold"],
+    "audience": {"age": "e.g. 11-14", "life_stage": "school|college|office|home|hobby|gift", "confidence": "high|medium|low",
+                 "world": "where they use it", "owned_props": [""], "banned": ["props / settings wrong for this user"]},
+    "colour_plan": {"product": "", "surface": "", "background": "", "accents": "1-2 prop colours echoing the product"},
     "identity": {"type": "", "form": "", "parts": [""], "item_count": 1, "states": "e.g. closed; can open"},
     "appearance": {"colours": [{"name": "", "hex": "#", "where": ""}], "materials": [""], "finish": "",
                    "pattern": "what it is and where it sits", "printed_text": [{"text": "exact", "where": "", "style": ""}],
@@ -60,7 +95,7 @@ SCHEMA = {
     "hero_features": ["1-3 things a buyer must see, most important first"],
     "risks": ["what an image AI is likely to get wrong"],
     "must_keep": ["short list of things that must never change"],
-    "shots": {k: {"goal": "", "scene": "the real place, e.g. kid's study desk by a window",
+    "shots": {k: {"goal": "", "feature": "the feature this slot shows", "moment": "the real moment", "scene": "the real place, e.g. kid's study desk by a window",
                   "surface": "material + colour + texture, e.g. pale oak desk, fine grain",
                   "backdrop": "what is behind, e.g. plain warm-white wall, softly out of focus",
                   "camera": "angle, e.g. 30 degrees above, three-quarter front", "lens": "e.g. 85 mm product lens look",
@@ -86,7 +121,14 @@ INSTRUCTIONS = """You are the art director and product analyst of an in-house e-
 (they are all filed under one product code) and the facts given (master sheet, and the brand's OFFICIAL product page
 when present: use its dimensions and description). Do not use any other source, do not guess from the web.
 
-Do this in order and return ONE JSON object exactly in the schema at the end:
+Do this in order and return ONE JSON object exactly in the schema at the end (the PRODUCT MEMORY):
+0. INPUT TRIAGE - judge every photo on its own as a finished 4:5 (1200x1500) listing image for one slot (hero, lifestyle,
+   use_case, detail): "use" = already right (product exact and sharp, slot purpose clear, soft light, no other brands,
+   no heavy graphics, enough resolution); "edit" = right content and angle with small gaps fixable without touching the
+   product (crop, colour / white balance, remove small icons, badges or dimension lines, soften harsh light, clean the
+   background) - list the edits; "reference" = useful product truth but not publishable (dimension drawings, plain
+   packshots, odd angles); "reject" = blurry, wrong product, watermark, low quality. At most one photo per slot, the best.
+   Photos with other products (even of the same brand) that could look included are never "use".
 1. PHOTO CHECK - for every photo (index 0..n-1, in the order given): is it THIS product (same code / name / colourway)? Is it
    usable as a product reference (not a catalogue page, not a group of different products, not blurry or tiny)? Its angle.
    Mark wrong or unusable photos with a short reason. Be strict: a different colourway or design is NOT this product.
@@ -102,7 +144,19 @@ Do this in order and return ONE JSON object exactly in the schema at the end:
 6. CATEGORY & ENVIRONMENT - category, the best real setting to shoot it (e.g. kid's study desk, office desk, art table),
    matching PROP TYPES (plain, generic, unbranded) and mood.
 7. HERO FEATURES - the 1-3 things a buyer must see. RISKS - what an image generator would likely get wrong. MUST KEEP.
-8. SHOT PLANS - plan the 4 listing shots for THIS product, following the studio rules and shot rules below and the brand
+7b. CHECKPOINTS - fill "checks". A (must pass): A1 facts from photos + official page / store text, A2 every function
+   named, A3 how each is used (which part touches what), A4 a real photo of every part a slot will show (else say which
+   view is missing), A5 exact text, A6 what is in the box vs props. B (true/false): B1 user and age, B2 their world,
+   B3 props they own, B4 real size, B5 colour plan (product colours, 1-2 prop accents, a different neutral background,
+   never one colour everywhere), B6 every key feature mapped to a slot, B7 four different angles, B8 a real moment per
+   slot, B9 fits SkyBlue's Indian customers, B10 safe and suitable (no blades near kids' products), B11 form and
+   placement. FORM: decide from the real W x H x D, never from the reference photo's angle: flat/thin (depth < 15% of the
+   longest side or < 3 cm) lies flat, hero straight top-down; long & thin lies flat, top-down or high; standing stands,
+   eye level or low 3/4; boxy on its widest base, 3/4 at 30-45 deg; soft slightly slouched or worn, eye level. The face
+   with the label faces the camera and its text reads upright. If the physics do not work, change the placement.
+   AUDIENCE: read the age and life stage from colours, print, size, design and price; their world, the props they own
+   and a banned list (e.g. laptop and coffee cup for a kids' bag).
+8. SHOT PLANS - plan the 4 listing shots (order: hero, lifestyle, use_case, detail) for THIS product, following the studio rules and shot rules below and the brand
    rules. Every shot has props (hero: {hero_props}). The DETAIL shot is NOT a plain zoom: show the most important hero
    feature in a way that explains it (e.g. a fountain-pen nib writing, a multi-tool opened out, the tips of a colour set in
    order). USE CASE shows the right user using it in the right place (hands only if they fit the use and the brand allows).
@@ -126,6 +180,9 @@ Do this in order and return ONE JSON object exactly in the schema at the end:
    only if it shows the planned feature).
 10. review_needed = true when the photos are unclear, contradictory, show several products, or the product is hard to
    reproduce (fine text, complex pattern, many items); say why in review_reason.
+
+SLOT RULES (fixed per slot):
+{slots}
 
 HOUSE LOOK (fixed for every image):
 {look}
@@ -215,7 +272,7 @@ def make_plan(s: Session, key: str, prov, charge=None) -> dict:
              "official_website": {k: v for k, v in (ld.get("web") or {}).items() if k in ("url", "title", "description", "dimensions")},
              "skyblue_store": {"title": (ld.get("store") or {}).get("title", ""), "description": ld.get("store_description", "")}}
     busy = any(w in (lp.name or "").lower() for w in ("set", " x", "pack", "assorted", "colours", "colors"))
-    prompt = INSTRUCTIONS.format(hero_props="0-1 small props, the set itself is busy" if busy else "1-3 small props at the edges",
+    prompt = INSTRUCTIONS.format(slots="\n".join(f"- {v}" for v in SLOT_STATIC.values()), hero_props="0-1 small props, the set itself is busy" if busy else "1-3 small props at the edges",
                                  look=house_look(s), static=static_rules(s), shot_rules=_shot_rules(s), brand=brand_txt,
                                  facts=json.dumps(facts, ensure_ascii=False), schema=json.dumps(SCHEMA, ensure_ascii=False))
     model = (get_setting(s, "model_planner", "") or "").strip()
@@ -281,11 +338,65 @@ def memory_facts(plan: dict, ld: dict) -> dict:
             "watch": list(dict.fromkeys(watch + (plan.get("risks") or [])))[:10]}
 
 
+def gate(plan: dict) -> dict:
+    """Checkpoint gate: every A must pass and at least B_PASS of the 11 B checks. Plans without 'checks' (older) pass."""
+    ch = plan.get("checks") or {}
+    if not ch:
+        return {"ok": True, "a_failed": [], "b_score": None, "why": ""}
+    a_failed = [k for k, v in ch.items() if k.startswith("A") and isinstance(v, dict) and v.get("pass") is False]
+    b = [v for k, v in ch.items() if k.startswith("B")]
+    b_score = sum(1 for v in b if (v.get("pass") if isinstance(v, dict) else v) is not False)
+    why = []
+    for k in a_failed:
+        why.append(f"{k}: {(ch[k] or {}).get('note') or 'failed'}")
+    if b and b_score < B_PASS:
+        why.append(f"checkpoints B {b_score}/{len(b)} (need {B_PASS})")
+    return {"ok": not why, "a_failed": a_failed, "b_score": b_score, "why": "; ".join(why)}
+
+
 def needs_review(s: Session, rec: dict | None) -> bool:
     if not rec or rec.get("approved"):
         return False
+    pj = rec.get("json") or {}
+    if not gate(pj)["ok"]:
+        return True
     mode = get_setting(s, "plan_review", "flagged")
-    return mode == "always" or (mode == "flagged" and bool((rec.get("json") or {}).get("review_needed")))
+    return mode == "always" or (mode == "flagged" and bool(pj.get("review_needed")))
+
+
+def review_reason(rec: dict | None) -> str:
+    pj = (rec or {}).get("json") or {}
+    return gate(pj)["why"] or pj.get("review_reason") or "flagged by the analysis"
+
+
+def reuse_for(rec: dict | None, kind: str) -> dict | None:
+    """Input-image triage: the best input photo for this slot that can be used as-is or after a small edit.
+    Returns {"image_id", "verdict": "use"|"edit", "edits": [...], "why"} or None (then the slot is generated)."""
+    pj = (rec or {}).get("json") or {}
+    ids = (rec or {}).get("photos") or []
+    best = None
+    for p in pj.get("photos") or []:
+        tr = (p or {}).get("triage") or {}
+        if str(tr.get("slot", "")).strip().lower() != kind or tr.get("verdict") not in ("use", "edit"):
+            continue
+        if p.get("is_this_product") is False or p.get("usable") is False:
+            continue
+        try:
+            img_id = ids[int(p.get("index", -1))]
+        except (ValueError, TypeError, IndexError):
+            continue
+        cand = {"image_id": img_id, "verdict": tr["verdict"], "edits": [e for e in tr.get("edits") or [] if e],
+                "why": tr.get("why", "")}
+        if best is None or (cand["verdict"] == "use" and best["verdict"] != "use"):
+            best = cand
+    return best
+
+
+EDIT_PROMPT = """Edit this real product photograph into a finished SkyBlue listing image. Make ONLY these small changes:
+{edits}
+Keep everything else exactly as it is: the product (shape, colours, every printed word and logo), its position, the
+props, the scene and the camera angle. Do not add anything. Light and colour: soft, even, neutral white balance (about
+5200 K), no harsh sun patches, muted natural grading. Output a clean real photograph, 4:5 portrait."""
 
 
 def mark_stale(s: Session, key: str):
@@ -341,6 +452,18 @@ def render(plan: dict, kind: str, static: str, anchored: bool, approved_facts: s
         f"MUST KEEP: {_j(plan.get('must_keep'))}." if plan.get("must_keep") else "",
         approved_facts,
         f"SHOT {SHOT_TITLE.get(kind, kind)}: {sh.get('goal', '')}",
+        f"SLOT RULES: {SLOT_STATIC[kind]}" if kind in SLOT_STATIC else "",
+        f"FEATURE SHOWN: {sh['feature']}." if sh.get("feature") else "",
+        f"MOMENT: {sh['moment']}." if sh.get("moment") else "",
+        ("PRODUCT FORM: " + "; ".join(x for x in (fm.get("class"), fm.get("dimensions_mm"), fm.get("placement"),
+                                                   f"hero camera {fm['hero_camera']}" if fm.get("hero_camera") and kind == "hero" else "",
+                                                   f"label face: {fm['informative_face']}" if fm.get("informative_face") else "") if x) + ".")
+        if (fm := plan.get("form") or {}) else "",
+        ("USER: " + "; ".join(x for x in (au.get("age"), au.get("life_stage"), au.get("world")) if x) + "."
+         + (f" Never show: {_j(au['banned'])}." if au.get("banned") else ""))
+        if (au := plan.get("audience") or {}) and kind != "hero" else "",
+        ("COLOUR PLAN: " + "; ".join(f"{k} {v}" for k, v in (plan.get("colour_plan") or {}).items() if v)
+         + ". Never one colour across background, surface and props.") if plan.get("colour_plan") else "",
         f"SET: {sh.get('scene', '')}. Surface: {sh.get('surface', '')}."
         + (f" Backdrop: {sh['backdrop']}." if sh.get("backdrop") else "")
         + f" Product: {sh.get('product_state', 'as in the photos')}.",
