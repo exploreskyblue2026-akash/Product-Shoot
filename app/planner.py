@@ -66,7 +66,8 @@ The 4 shots look like one photoshoot."""
 SCHEMA = {
     "photos": [{"index": 0, "is_this_product": True, "usable": True, "angle": "front|angle|side|back|top|detail|in_use|packaging|group",
                 "reason_if_discarded": "",
-                "triage": {"verdict": "use|edit|reference|reject", "slot": "hero|lifestyle|use_case|detail|none",
+                "triage": {"verdict": "use|edit|reference|reject", "slot": "lifestyle|use_case|detail|none",
+                           "only_this_product": True,
                            "edits": ["only for 'edit': small fixes, e.g. remove the '95gr' icon; soften harsh light"],
                            "why": "one sentence"}}],
     "checks": {"A1_facts": {"pass": True, "note": "sources read"}, "A2_features": {"pass": True, "note": ""},
@@ -128,7 +129,10 @@ Do this in order and return ONE JSON object exactly in the schema at the end (th
    product (crop, colour / white balance, remove small icons, badges or dimension lines, soften harsh light, clean the
    background) - list the edits; "reference" = useful product truth but not publishable (dimension drawings, plain
    packshots, odd angles); "reject" = blurry, wrong product, watermark, low quality. At most one photo per slot, the best.
-   Photos with other products (even of the same brand) that could look included are never "use".
+   The HERO is never taken from a photo: it is always staged by the approach, so slot is only lifestyle, use_case or
+   detail. "only_this_product" is false when any other product is visible (other designs, pencil cases, sharpeners,
+   toys - even of the same brand); such a photo can never be "use" or "edit". When the photos show several designs or
+   models, say which one this code is in identity and mark photos of other models is_this_product false.
 1. PHOTO CHECK - for every photo (index 0..n-1, in the order given): is it THIS product (same code / name / colourway)? Is it
    usable as a product reference (not a catalogue page, not a group of different products, not blurry or tiny)? Its angle.
    Mark wrong or unusable photos with a short reason. Be strict: a different colourway or design is NOT this product.
@@ -377,7 +381,9 @@ def reuse_for(rec: dict | None, kind: str) -> dict | None:
     best = None
     for p in pj.get("photos") or []:
         tr = (p or {}).get("triage") or {}
-        if str(tr.get("slot", "")).strip().lower() != kind or tr.get("verdict") not in ("use", "edit"):
+        if kind == "hero" or str(tr.get("slot", "")).strip().lower() != kind or tr.get("verdict") not in ("use", "edit"):
+            continue
+        if tr.get("only_this_product") is not True:          # other products in frame could look included
             continue
         if p.get("is_this_product") is False or p.get("usable") is False:
             continue

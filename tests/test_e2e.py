@@ -132,7 +132,7 @@ def test_review_when_qc_fails():
         item = next(q for q in st["queue"] if q["code"] == "NEW-CODE-1")
         assert item["stage"] == "review"
         prod = c.get(f"/api/products/{item['id']}").json()
-        assert prod["shots"][2]["status"] == "fail" and prod["shots"][2]["attempts"] == 3
+        assert prod["shots"][2]["status"] == "fail" and prod["shots"][2]["attempts"] == 2   # capped at 2 tries per shot
     finally:
         mock.MockProvider.qc = orig
 
@@ -1013,7 +1013,7 @@ def test_hybrid_hero_keeps_real_pixels_for_clean_packshot():
     from PIL import Image, ImageDraw
     c = client()
     c.post("/api/library/clear")
-    c.put("/api/admin/settings", json={"engine_mode": "hybrid", "planner_on": True, "plan_review": "never",
+    c.put("/api/admin/settings", json={"engine_mode": "hybrid", "planner_on": True, "plan_review": "never", "hero_real_pixels": True,
                                        "max_cost_product": 5, "daily_budget": 100, "default_shots": [1], "hero_gate": False,
                                        "retries": 0, "model_hero": "", "escalate_model": ""})
     im = Image.new("RGB", (1600, 2000), (248, 248, 248)); ImageDraw.Draw(im).rectangle([500, 500, 1100, 1500], fill=(20, 60, 200))
@@ -1282,10 +1282,13 @@ def test_checkpoint_gate_and_input_reuse():
     assert planner.gate({})["ok"]                             # older plans still pass
     rec = {"photos": [11, 12, 13], "json": {"photos": [
         {"index": 0, "triage": {"verdict": "reference", "slot": "none"}},
-        {"index": 1, "triage": {"verdict": "edit", "slot": "detail", "edits": ["remove the 95gr icon"]}},
-        {"index": 2, "triage": {"verdict": "use", "slot": "detail", "why": "back cover text"}}]}}
+        {"index": 1, "triage": {"verdict": "edit", "slot": "detail", "only_this_product": True, "edits": ["remove the 95gr icon"]}},
+        {"index": 2, "triage": {"verdict": "use", "slot": "detail", "only_this_product": True, "why": "back cover text"}},
+        {"index": 0, "triage": {"verdict": "use", "slot": "lifestyle", "only_this_product": False}},
+        {"index": 1, "triage": {"verdict": "use", "slot": "hero", "only_this_product": True}}]}}
     assert planner.reuse_for(rec, "detail")["image_id"] == 13          # 'use' beats 'edit'
-    assert planner.reuse_for(rec, "hero") is None
+    assert planner.reuse_for(rec, "hero") is None                       # hero is always staged
+    assert planner.reuse_for(rec, "lifestyle") is None                  # other products visible
     assert list(planner.SHOTS) == ["hero", "lifestyle", "use_case", "detail"]
     assert "top-down" in planner.SLOT_STATIC["hero"]
 

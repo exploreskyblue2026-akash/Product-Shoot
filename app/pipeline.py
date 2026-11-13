@@ -346,7 +346,7 @@ def process(pid: int, only: list[int] | None = None):
             s.commit()
             prompt = spec["prompt"]
             override = (((p.data or {}).get("prompt_override") or {}).get(str(no)) or "").strip()
-            if plan_rec is not None and not override and get_setting(s, "reuse_inputs", True):
+            if sh.kind != "hero" and plan_rec is not None and not override and get_setting(s, "reuse_inputs", True):
                 done = _reuse_input(s, p, sh, plan_rec, prov, model, size, rv, qc_mode)
                 if done:
                     continue
@@ -441,7 +441,8 @@ def process(pid: int, only: list[int] | None = None):
             if escalate.startswith("openrouter:") and not get_setting(s, "use_openrouter", False):
                 escalate = ""
             escalated = False
-            for attempt in range(retries + 1 + (1 if escalate and escalate != model else 0)):
+            max_tries = max(1, int(get_setting(s, "max_attempts_shot", 2) or 2))   # hard cap per shot per run
+            for attempt in range(min(max_tries, retries + 1 + (1 if escalate and escalate != model else 0))):
                 if STOP.is_set():
                     stop_reason = "Stopped by you"
                     break
@@ -453,7 +454,9 @@ def process(pid: int, only: list[int] | None = None):
                 how = {"method": "fresh"}
                 real_px = False
                 if (not accurate and no == 1 and get_setting(s, "engine_mode", "classic") == "hybrid" and kept
-                        and not override):
+                        and not override and (plan is None or get_setting(s, "hero_real_pixels", False))):
+                    # with a shot plan the hero is always staged by the approved approach (set, props, light);
+                    # pasting the store packshot onto a background is only the fallback without a plan
                     from . import engine as _eng
                     try:                                  # clean, high-res packshot: keep the real product pixels
                         from PIL import Image as _PI

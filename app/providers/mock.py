@@ -23,7 +23,7 @@ class MockProvider:
             far = sum(abs(a - b) for a, b in zip(m, means[0])) > 150
             photos.append({"index": n, "is_this_product": not far, "usable": True, "angle": "front" if n == 0 else "angle",
                            "reason_if_discarded": "different colourway" if far else "",
-                           "triage": ({"verdict": "use", "slot": "detail", "why": "mock: already a clean detail"}
+                           "triage": ({"verdict": "use", "slot": "detail", "only_this_product": True, "why": "mock: already a clean detail"}
                                       if n == 0 and "REUSEME" in prompt else {"verdict": "reference", "slot": "none"})})
         shot = lambda k: {"goal": f"{k} goal", "scene": f"{k} scene", "surface": "light grey", "camera": "3/4, 85mm",  # noqa: E731
                           "composition": "centred, 60%", "props": ["plain pencil"], "hands": "child" if k == "use_case" else "none",
