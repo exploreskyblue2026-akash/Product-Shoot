@@ -53,7 +53,7 @@ class MockProvider:
         p = context["product"]
         return {"sku": p.get("code"), "brand_id": p.get("brand_id") or "_default", "category_id": p.get("category_id"),
                 "product_description": f"{p.get('name')} (mock analysis)", "visible_text": [p.get("name", "")[:30]],
-                "dominant_colours_hex": ["#888888"], "item_count": 1, "risks": []}
+                "dominant_colours_hex": ["#888888"], "item_count": 1, "risks": [], "form": "boxy"}
 
     def generate(self, prompt: str, raw: bytes, model: str, size: str = "1K", refs: list | None = None, style: bytes | None = None) -> bytes:
         kind = next((k for k in SETS if f"— {k}" in prompt or f"{k}:" in prompt), "hero")

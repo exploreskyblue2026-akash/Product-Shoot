@@ -11,6 +11,7 @@
     "material": "string",
     "is_set_or_kit": "boolean",
     "item_count": "integer",
+    "form": "flat_thin | long_thin | standing | boxy | soft_flexible | reflective — the product's own real physical shape (thickness, height, flexibility, surface finish), judged by looking at the product itself; never inferred from the angle the reference photo happens to be shot at",
     "price_tier": "value | mid | premium — from brand positioning + sheet price",
     "mood_id": "chosen from: brand.mood_override > sheet.mood_override > category.default_moods (pick the one that best matches product colours)",
     "surface": "chosen from category.surfaces filtered by mood.surfaces_preferred; must contrast with product colour",
@@ -26,6 +27,7 @@
   "selection_rules": [
     "Priority: brand rules > sheet overrides > category defaults > studio default.",
     "Surface must contrast with the product: dark product -> lighter surface (unless luxe_moody, then mid-tone with soft rim separation).",
+    "form decides the hero camera angle, never the reference photo: flat/thin -> top-down flat lay; long & thin -> top-down or high angle; standing -> eye level or low 3/4; boxy -> 3/4 at 30-45 degrees; soft/flexible -> eye level, slightly slouched; reflective -> an angle that avoids room reflections. The reference photo's own angle is for product-identification only.",
     "Props must match the chosen mood AND category; drop any prop listed in brand_donts.",
     "Prefer props whose colours sit in the mood palette; never pick a prop the same colour as the product.",
     "Never reuse the identical prop set for two SKUs of the same category in one batch — rotate."

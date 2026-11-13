@@ -6,7 +6,7 @@ The product is the clear hero: ~70% of visual attention on the product, ~30% on 
 This is a real product we sell; the picture is legal proof of what the customer receives. Reproduce it EXACTLY as in the real product photos: {product_description}. Same shape, proportions, colours ({product_colours}), materials, finish, pattern and print placement, logo and every printed word ("{visible_text}"), same number of items ({item_count}) in the same order. Do not redesign, simplify, recolour, re-pattern, re-letter or "improve" anything. Do not show a side or part that is not visible in the photos.
 
 [3 SHOT DIRECTION — static per shot]
-Shot {shot_no} of 5 — {shot_id}: {shot_purpose}.
+Shot {shot_no} of 4 — {shot_id}: {shot_purpose}.
 Camera: {shot_camera}. Framing: {shot_framing}. Depth of field: {shot_dof}.
 
 [4 SCENE — dynamic]

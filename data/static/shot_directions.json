@@ -1,11 +1,11 @@
 {
-  "_layer": "STATIC — the 5 shots, fixed order. {placeholders} are filled from the dynamic layer.",
+  "_layer": "STATIC — the 4 shots, fixed order. {placeholders} are filled from the dynamic layer. The hero 'camera' text below is a fallback only: app/dataset.py build_prompts() overrides it from the vision analysis's 'form' field (FORM_CAMERA table) so the angle comes from the product's real shape, never from the reference photo.",
   "shots": [
     {
       "no": 1,
       "id": "hero",
       "purpose": "Shopify main image: the product alone, exactly as it is, shot in our in-house studio",
-      "camera": "same angle as the main real photo (usually straight-on front or the photo's own 3/4 turn), eye level to 15 degrees above; 85-100mm product lens",
+      "camera": "chosen from the product's real form, never copied from the reference photo's angle: flat/thin -> straight top-down flat lay; long & thin -> top-down or high angle 60-75 degrees; standing -> eye level or low 3/4; boxy -> 3/4 at 30-45 degrees; soft/flexible -> eye level, slightly slouched; reflective -> an angle that avoids room reflections. 85-100mm product lens (50-85mm for top-down).",
       "framing": "product centred, 65-75% of the frame, whole product visible, at least 8% margin",
       "set": "clean seamless backdrop in {hero_backdrop}, soft contact shadow, nothing else on the set",
       "props": "0-2 small, plain, real studio objects only (e.g. a blank paper sheet, a plain ceramic dish, a sprig of greenery), placed at the edges, out of focus, never touching or covering the product",

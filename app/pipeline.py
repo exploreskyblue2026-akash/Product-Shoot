@@ -419,7 +419,10 @@ def process(pid: int, only: list[int] | None = None):
                     except Exception:
                         pass
             if ang == "" or (card.get("angle") == "photo" and not any(a in angle_raw for a in ("angle", "side"))):
-                ang = "" if no != 1 else "Camera: the same angle as the main real photo."
+                # no brand-specific override: let the shot direction's form-based camera rule stand, never force
+                # "same angle as the main real photo" (that copies the reference photo instead of deciding from
+                # the product's real shape, which is the whole point of the approved checklist)
+                ang = ""
             if plan is None and (cl or ang):
                 spec = {**spec, "prompt": spec["prompt"] + "\n\n[BRAND SHOT CARD - follow this over the generic scene "
                         "above]\n" + "\n".join(cl + ([ang] if ang else []))}

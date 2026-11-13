@@ -13,6 +13,18 @@ LIB_TABLES = {"brands": "brand_id", "categories": "category_id", "moods": "mood_
 DEFAULT_STRENGTH = {"lighting": "strict", "attention": "normal", "size": "normal",
                     "props": "normal", "negative_space": "relaxed"}
 
+# Hero camera angle, decided from the product's real physical form (checklist B11) — never from the angle the
+# reference photo happens to be shot at. Keyed by the vision analysis's "form" field.
+FORM_CAMERA = {
+    "flat_thin": "straight top-down flat lay, camera parallel to the surface",
+    "long_thin": "top-down, or a high angle 60-75 degrees above",
+    "standing": "eye level, or a low 3/4 angle",
+    "boxy": "3/4 angle at 30-45 degrees above",
+    "soft_flexible": "eye level, the product slightly slouched/resting naturally, not propped stiff",
+    "reflective": "an angle chosen to avoid the studio/room reflecting in the surface — usually a slight 3/4 turn",
+    "_default": "3/4 angle at 30-45 degrees above (the safest default when the form is unclear)",
+}
+
 DEFAULT_SETTINGS = {
     "engine_mode": "classic",      # accurate: keep the real photo (edit / crop / restore); classic: always regenerate
     "library_focus": False,        # False: scan everything in Raw input; True: only shoot-sheet / brand-queue codes
@@ -150,6 +162,23 @@ def seed(s: Session, owner_email: str, owner_hash: str):
         except Exception as e:
             print(f"[seed] match re-check failed: {e}")
         set_setting(s, "recheck_matches_v1", True)
+    if not get_setting(s, "classic_camera_fix_v1", False):
+        # 13 Nov 2026: the "classic" path (products with no lib_key, uploaded via /api/sources/upload) was still
+        # rendering the hardcoded "same angle as the main real photo" text, bypassing the agreed form-based
+        # camera-angle checklist entirely. Re-seed the static rule text into every stored RuleVersion, and clear
+        # the cached vision analysis for classic-path products so they get the new "form" field on next run.
+        new_std, new_dirs2 = _read_json("studio_standard.json"), _read_json("shot_directions.json")
+        new_schema, new_tpl = _read_json("vision_analysis_schema.json"), (DATA_DIR / "static" / "prompt_template.txt").read_text(encoding="utf-8")
+        for rv in s.scalars(select(RuleVersion)):
+            d = dict(rv.data or {})
+            d["studio_standard"], d["shot_directions"] = new_std, new_dirs2
+            d["vision_schema"], d["prompt_template"] = new_schema, new_tpl
+            rv.data = d
+        from .db import Product as _Product
+        for p in s.scalars(select(_Product)):
+            if not (p.data or {}).get("lib_key") and p.analysis and "form" not in p.analysis:
+                p.analysis = {}
+        set_setting(s, "classic_camera_fix_v1", True)
     if not s.scalars(select(User).where(User.email == owner_email)).first():
         s.add(User(email=owner_email, role="owner", password_hash=owner_hash, active=True))
     s.commit()
@@ -290,6 +319,12 @@ def build_prompts(s: Session, product, analysis: dict, rv: RuleVersion, notes: d
             plist = sc["props"]["detail"] if sc["detail_mode"] == "macro" else []
         else:
             camera, framing, dof = sh["camera"], sh["framing"], sh["depth_of_field"]
+            if sid == "hero":
+                # decide the camera angle from the product's real shape, never from the reference photo's angle
+                form = (analysis.get("form") or "").strip()
+                lens = "50-85mm" if form in ("flat_thin",) else "85-100mm"
+                camera = (f"Camera direction from the product's real form: {FORM_CAMERA.get(form, FORM_CAMERA['_default'])}. "
+                          f"Do not copy the angle of the reference photo itself. {lens} product lens")
             scene = {"hero": "clean seamless backdrop", "use_case": sc["cat"].get("use_scene", "the product in use"),
                      "arrangement": sc["cat"].get("arrangement_rule", "flat-lay arrangement"),
                      "lifestyle": sc["cat"].get("lifestyle_scene", "styled lifestyle scene")}[sid]

@@ -3,12 +3,12 @@
   "version": "1.0",
   "output": {
     "aspect_ratio": "4:5",
-    "master_px": [2000, 2500],
+    "master_px": [1200, 1500],
     "social_px": [1080, 1350],
     "format": "jpg",
     "colour_space": "sRGB",
     "max_web_kb": 1000,
-    "images_per_sku": 5,
+    "images_per_sku": 4,
     "one_set_per_colourway": true
   },
   "lighting": {
