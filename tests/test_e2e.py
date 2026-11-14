@@ -1,4 +1,5 @@
-"""End-to-end run with the mock AI provider: upload → autopilot → 5 shots → QC → saved. Run: python -m pytest -q"""
+"""End-to-end run with the mock AI provider. One path for every product: photos filed in the Library → one analysis
+(memory, checklist gate, triage, four plans) → reuse / edit / generate → QC → saved. Run: python -m pytest -q"""
 import os
 import tempfile
 from pathlib import Path
@@ -20,7 +21,6 @@ def client():
     c.__enter__()
     r = c.post("/api/login", json={"email": "owner@test.com", "password": "pw-for-tests"})
     assert r.status_code == 200, r.text
-    c.post("/api/autopilot", json={"pipeline_mode": "v1"})   # legacy 'add input' flow; shoot-sheet tests switch to v2
     c.put("/api/admin/settings", json={"hero_review": False,   # older tests generate all shots in one go
                                        "auto_prepare": False, "use_websites": False})   # never reach real websites
     return c
@@ -67,7 +67,10 @@ def test_full_flow():
     from PIL import Image
     import io
     assert Image.open(io.BytesIO(img.content)).size == (1200, 1500)
-    assert "STRICTLY SOFT" in pipeline.SessionLocal().get(pipeline.Shot, 1).prompt
+    sent = pipeline.SessionLocal().get(pipeline.Shot, 1).prompt
+    assert sent.startswith("REFERENCE IMAGES") and "SLOT RULES:" in sent and "STUDIO LOOK" in sent
+    assert "[1 STUDIO STANDARD" not in sent and "same angle as the main real photo" not in sent
+    assert st["pipeline_mode"] == "v2" and all(q["v2"] for q in st["queue"] + st["saved"])   # uploads take the one path too
 
     # regenerate one shot with a note, then approve
     pid = saved[0]["id"]
@@ -86,7 +89,7 @@ def test_admin():
     assert rules["live"]["version"] == 1
     c.put("/api/admin/rules/draft", json={"data": {"strength": {"lighting": "normal"}}})
     pv = c.get("/api/admin/rules/preview?shot=2").json()
-    assert "Soft diffused light" in pv["prompt"]
+    assert pv["kind"] == "lifestyle" and "SHOT 2 · LIFESTYLE" in pv["prompt"] and "[1 STUDIO STANDARD" not in pv["prompt"]
     assert c.post("/api/admin/rules/submit").json()["ok"]
     assert c.post("/api/admin/rules/approve").json()["ok"]   # single admin may approve their own change
     assert c.get("/api/admin/rules").json()["live"]["version"] == 2
@@ -151,7 +154,7 @@ def test_cost_controls():
     prod = c.get(f"/api/products/{pid}").json()
     made = [s for s in prod["shots"] if s["image"]]
     assert len(made) == 1 and made[0]["attempts"] == 1 and "lite" in made[0]["model"]
-    assert prod["cost"] < 0.05
+    assert prod["cost"] < 0.08                              # one lite image + its check + the one analysis
     # on-demand: generate shot 5 only
     c.post(f"/api/products/{pid}/regenerate", json={"shot": 4})
     pipeline.tick()
@@ -200,7 +203,7 @@ def test_approve_hero_then_rest_stop_and_remove():
     pid = q["FLOW-TEST-1"]
     c.post(f"/api/products/{pid}/run"); pipeline.tick()
     assert c.get(f"/api/products/{pid}").json()["stage"] == "review"
-    r = c.post(f"/api/products/{pid}/approve", json={}).json()
+    r = c.post(f"/api/products/{pid}/approve", json={"make": [2, 3, 4]}).json()
     assert r["generating"] == [2, 3, 4]
     pipeline.tick()
     prod = c.get(f"/api/products/{pid}").json()
@@ -253,7 +256,7 @@ def test_library_phase1():
     assert rows["PEN20/SI"]["status"] == "cutting" and rows["PIP25/BL"]["status"] == "needs_photo"
     assert len(st["unmatched"]) == 1
     pend = c.get("/api/library/pending").json()
-    assert {p["key"] for p in pend} == {"TRV20GY", "PEN20SI"}
+    assert {"TRV20GY", "PEN20SI"} <= {p["key"] for p in pend}
     gid = next(p["id"] for p in pend if p["key"] == "TRV20GY")
     r = c.post(f"/api/library/images/{gid}/cutout", files={"file": ("x.png", png((20, 20, 20), alpha=True), "image/png")}).json()
     assert r["status"] == "ok", r
@@ -268,24 +271,22 @@ def test_library_phase1():
     assert c.get("/library").status_code == 200
 
 
-def test_v2_shoot_sheet_only():
-    """v2: only shoot-sheet codes are queued; only requested shots are made; pool scenes reused; queue editable."""
+def test_shoot_sheet_queue_order_and_requested_shots():
+    """Shoot-sheet codes are queued in sheet order; only the requested shots are made; the queue is editable; every
+    image is written from the product's analysed plan (there is no cut-out / scene-pool engine)."""
     import io, time, openpyxl
     from PIL import Image, ImageDraw
     c = client()
-    c.put("/api/admin/settings", json={"library_cutouts": True})
+    c.put("/api/admin/settings", json={"library_cutouts": True, "engine_mode": "accurate", "planner_on": False,
+                                       "plan_review": "never"})          # old switches: must change nothing
     LIB = Path(__file__).parent / "library"
     def photo(color):
         im = Image.new("RGB", (1000, 1000), (255, 255, 255))
         ImageDraw.Draw(im).rectangle([250, 300, 750, 700], fill=color)
         b = io.BytesIO(); im.save(b, "PNG"); return b.getvalue()
-    def cut(color):
-        im = Image.new("RGBA", (1000, 1000), (0, 0, 0, 0))
-        ImageDraw.Draw(im).rectangle([250, 300, 750, 700], fill=color + (255,))
-        b = io.BytesIO(); im.save(b, "PNG"); return b.getvalue()
     wb = openpyxl.Workbook(); ws = wb.active
     ws.append(["SHOOT", "SHOTS", "PRIORITY", "NOTE"])
-    ws.append(["TRV20/GY", "1,3", 2, ""]); ws.append(["TRV20/BK", "1,3", 1, "black first"]); ws.append(["PEN20/SI", "", 3, ""])
+    ws.append(["TRV20/GY", "1,3", 2, ""]); ws.append(["TRV20/BK", "1,3", 1, "black first"]); ws.append(["PIP25/BL", "", 3, ""])
     ws.append(["NOT-A-CODE", "", 4, ""])
     b = io.BytesIO(); wb.save(b)
     c.post("/api/library/upload", files=[("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "x/y")),
@@ -296,47 +297,45 @@ def test_v2_shoot_sheet_only():
         if not c.get("/api/library").json()["job"]["running"]:
             break
         time.sleep(0.1)
-    for p in c.get("/api/library/pending").json():
-        if p["key"] in ("TRV20GY", "TRV20BK"):
-            c.post(f"/api/library/images/{p['id']}/cutout", files={"file": ("c.png", cut((50, 50, 50)), "image/png")})
-    c.put("/api/admin/settings", json={"scene_strategy": "auto", "max_cost_product": 5, "daily_budget": 100,
-                                       "default_shots": [1, 2, 3, 4]})
-    c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": False})
+    c.put("/api/admin/settings", json={"max_cost_product": 5, "daily_budget": 100, "default_shots": [1, 2, 3, 4]})
+    c.post("/api/autopilot", json={"autopilot": False})
     r = c.post("/api/v2/load-shoot").json()
-    assert r["total"] == 4 and r["missing"] == 1 and r["waiting"] == 1, r
+    assert r["total"] == 4 and r["missing"] == 1, r                            # no cut-out needed: a photo is enough
     st = c.get("/api/state").json()
     assert st["pipeline_mode"] == "v2"
-    codes = [q["code"] for q in st["queue"]]
-    assert codes[:2] == ["TRV20/BK", "TRV20/GY"] and len(codes) == 4, codes        # sheet priority order, nothing else
-    assert not any(q["code"].startswith(("WAT", "CAM", "FLOW", "COST")) for q in st["queue"])  # v1 items hidden
+    sheet = [q["code"] for q in st["queue"] if q["code"] in ("TRV20/BK", "TRV20/GY", "PIP25/BL", "NOT-A-CODE")]
+    assert sheet[:2] == ["TRV20/BK", "TRV20/GY"] and len(sheet) == 4, sheet    # sheet priority order
     # editable queue: move GY to top, then pause it
     gy = next(q["id"] for q in st["queue"] if q["code"] == "TRV20/GY")
+    bk = next(q["id"] for q in st["queue"] if q["code"] == "TRV20/BK")
     c.post(f"/api/products/{gy}/move", json={"to": "top"})
     assert c.get("/api/state").json()["queue"][0]["code"] == "TRV20/GY"
+    c.post(f"/api/products/{bk}/move", json={"to": "top"})
+    c.post(f"/api/products/{gy}/move", json={"to": "top"})
     c.post(f"/api/products/{gy}/pause", json={"paused": True})
     c.post("/api/autopilot", json={"autopilot": True, "auto_approve": True})
     assert pipeline.tick()                                   # paused GY skipped -> BK runs
-    bk = next(q for q in c.get("/api/state").json()["saved"] if q["code"] == "TRV20/BK")
-    prod = c.get(f"/api/products/{bk['id']}").json()
-    made = [s["no"] for s in prod["shots"] if s["image"]]
-    assert made == [1, 3], made                               # only the shots in the sheet
-    assert all(s["qc"]["checks"]["product_exact"] for s in prod["shots"] if s["image"])
+    c.post("/api/autopilot", json={"autopilot": False})
+    prod = c.get(f"/api/products/{bk}").json()
+    assert prod["stage"] == "saved", prod["error"]
+    made = [s for s in prod["shots"] if s["image"]]
+    assert [s["no"] for s in made] == [1, 3]                  # only the shots in the sheet
+    assert [s["kind"] for s in made] == ["hero", "use_case"]
+    for s in made:                                            # written from the plan, or a supplied photo reused
+        assert s["prompt"].startswith(("REFERENCE IMAGES", "Input photo used", "Edit this real product photograph")), s["prompt"][:80]
+        assert s["qc"].get("how", {}).get("method") in ("fresh", "reused", "light_edit")
+        assert "v2" not in s["qc"] and "product_exact" not in s["qc"]["checks"] or s["qc"]["how"]["method"] == "reused"
     c.post(f"/api/products/{gy}/pause", json={"paused": False})
-    assert pipeline.tick()
+    c.post(f"/api/products/{gy}/run"); assert pipeline.tick()
     gyp = c.get(f"/api/products/{gy}").json()
     assert [s["no"] for s in gyp["shots"] if s["image"]] == [1, 3]
-    hows = {s["no"]: s["qc"]["v2"]["how"] for s in gyp["shots"] if s["image"]}
-    assert hows[1] == "fresh scene" and hows[3].startswith("pool scene"), hows   # hero fresh, detail reused (auto)
-    assert gyp["cost"] < prod["cost"] + 1e-9                  # second product cheaper thanks to the pool
-    # nothing else runs: PEN20/SI has no cut-out, NOT-A-CODE is not in the master
-    assert not pipeline.tick()
-    c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+    c.put("/api/admin/settings", json={"library_cutouts": False, "engine_mode": "classic", "planner_on": True})
 
 
 def test_saved_hero_only_can_make_more():
     """A product auto-saved with only the hero can still get shots 2-5 from the approve button."""
     c = client()
-    c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+    c.post("/api/autopilot", json={"autopilot": False})
     c.put("/api/admin/settings", json={"default_shots": [1], "max_cost_product": 5, "daily_budget": 100, "hero_gate": False})
     p = SAMPLES / "CAM-AOC-12_front.png"
     c.post("/api/sources/upload", files=[("files", ("MORE-TEST-1_front.png", p.read_bytes(), "image/png"))])
@@ -404,7 +403,7 @@ def test_shoot_sheet_with_original_photos():
             pass
     finally:
         mock.MockProvider.generate = orig
-        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+        c.post("/api/autopilot", json={"autopilot": False})
     c.post("/api/autopilot", json={"pipeline_mode": "v2"})
     st = c.get("/api/state").json()
     allp = {q["code"]: q for q in st["queue"] + st["saved"]}
@@ -414,7 +413,7 @@ def test_shoot_sheet_with_original_photos():
     assert [s["no"] for s in rd["shots"] if s["image"]] == [1, 2, 3, 4]            # blank = default (all 4)
     assert allp["PEN20/BK"]["stage"] == "needs_photo"
     assert 1 in seen["refs"]                                                       # YE got its second angle
-    c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+    c.post("/api/autopilot", json={"autopilot": False})
 
 
 def test_files_survive_wipe_via_drive_mirror():
@@ -454,10 +453,9 @@ def test_queue_drag_order():
     c.post("/api/autopilot", json={"pipeline_mode": "v1"})
 
 
-def test_brand_layer_house_style_unbranded_and_golden():
+def test_brand_layer_golden_upload_and_unbranded_rule():
     import io
     from PIL import Image
-    from app.providers import mock
     c = client()
     st = c.get("/api/style").json()
     keys = {b["key"] for b in st["brands"]}
@@ -466,21 +464,15 @@ def test_brand_layer_house_style_unbranded_and_golden():
     r = c.post("/api/style/brands/troika/golden", files=[("files", ("gold.jpg", b.getvalue(), "image/jpeg"))]).json()
     assert len(r["golden"]) == 1 and c.get(r["golden"][0]).status_code == 200
     assert c.get("/brands").status_code == 200
-    # unbranded product: prompt forbids invented branding; style reference passed for a branded one
-    from app.db import SessionLocal, Product
-    from app.dataset import build_prompts, live_rules
-    from app import pipeline as pl
-    with SessionLocal() as s:
-        p = Product(code="GEN-1", name="Desk organiser", brand_id="_default", category_id="desk_acc",
-                    data={"brand_label": "Made in China"})
-        s.add(p); s.flush()
-        prompt = build_prompts(s, p, {}, live_rules(s))[0]["prompt"]
-        assert "UNBRANDED PRODUCT" in prompt and "SKYBLUE LISTING STANDARD" in prompt
-        t = Product(code="TRV20/GY", name="Troika case", brand_id="troika", category_id="bag_travel", data={"brand_label": "TROIKA"})
-        s.add(t); s.flush()
-        assert "UNBRANDED" not in build_prompts(s, t, {}, live_rules(s))[0]["prompt"]
-        assert pl.style_reference(s, t) is not None
-        s.rollback()
+    # unbranded product: the one prompt system forbids invented branding; a branded product does not get that line
+    from types import SimpleNamespace as NS
+    from app import planner
+    plan = {"shots": {"hero": {"goal": "clear view"}}, "identity": {}, "appearance": {}}
+    un = planner.render(planner.for_product(plan, NS(brand="Made in China")), "hero", planner.DEFAULT_STATIC, anchored=False)
+    assert "UNBRANDED PRODUCT" in un and "Made in China" in un
+    br = planner.render(planner.for_product({**plan, "_brand": {"brand_name": "TROIKA"}}, NS(brand="TROIKA")), "hero",
+                        planner.DEFAULT_STATIC, anchored=False)
+    assert "UNBRANDED PRODUCT" not in br
 
 
 def test_product_memory_quality_gate_and_learning():
@@ -510,8 +502,8 @@ def test_product_memory_quality_gate_and_learning():
     rows = {r["code"]: r for r in st["rows"]}
     assert rows["PIP25/BL"]["status"] == "ready"
     assert rows["PIP25/YE"]["status"] == "low_quality" and "blurry" in rows["PIP25/YE"]["notes"]
-    # study + edit + approve memory
-    assert c.post("/api/library/study-shoot").status_code == 200
+    # the one analysis writes the product memory too (there is no separate study step); then edit + approve it
+    assert c.post("/api/library/plan-all").status_code == 200
     st = wait_job(c)
     bl = next(r for r in st["rows"] if r["code"] == "PIP25/BL" and r["in_shoot"] and r["images"])
     assert bl["memory"]["facts"]["summary"] and bl["primary"]["angle"] == "front"
@@ -528,14 +520,14 @@ def test_product_memory_quality_gate_and_learning():
                 "reasons": {"label_text": "logo misspelt as TROlKA"}}
     mock.MockProvider.generate, mock.MockProvider.qc = gen, qc
     try:
-        c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": True, "auto_approve": False})
+        c.post("/api/autopilot", json={"autopilot": True, "auto_approve": False})
         r = c.post("/api/v2/load-shoot").json()
         assert r["waiting"] == 1                                   # the blurry one is held back, nothing spent
         while pipeline.tick():
             pass
     finally:
         mock.MockProvider.generate, mock.MockProvider.qc = og, oq
-        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+        c.post("/api/autopilot", json={"autopilot": False})
     assert seen and "PRODUCT FACTS" in seen[0] and "TROIKA" in seen[0]
     watch = next(r for r in c.get("/api/library").json()["rows"] if r["code"] == "PIP25/BL" and r["in_shoot"] and r["images"])["memory"]["facts"]["watch"]
     assert any("TROlKA" in w for w in watch)
@@ -659,68 +651,51 @@ def test_brand_workspace_queue_and_order():
 
 
 
-def test_accuracy_engine_keeps_real_product():
-    """Accurate mode: hero/use case/lifestyle edit the real photo and restore its pixels; detail crops when big enough;
-    a photo without a plain background falls back to fresh generation; QC is skipped only for exact shots."""
-    import io, time, openpyxl
+def test_old_engine_switches_do_not_change_the_path():
+    """'Accurate', 'hybrid', real-pixel hero and cut-outs were separate image methods. They are gone: whatever those
+    settings say, the hero is generated from the analysed plan and checked, and a clean photo is never pasted."""
+    import io, openpyxl
     from PIL import Image, ImageDraw
     from app.providers import mock
     c = client()
     c.post("/api/library/clear")
-    c.put("/api/admin/settings", json={"engine_mode": "accurate", "library_cutouts": False, "max_cost_product": 5,
-                                       "daily_budget": 100, "default_shots": [1, 2, 3, 4], "hero_gate": False, "retries": 0})
+    c.put("/api/admin/settings", json={"engine_mode": "accurate", "hero_real_pixels": True, "library_cutouts": False,
+                                       "planner_on": False, "plan_review": "never", "max_cost_product": 5,
+                                       "daily_budget": 100, "default_shots": [1], "hero_gate": False, "retries": 0})
     LIB = Path(__file__).parent / "library"
-    def photo(size=1800, busy=False):
-        im = Image.new("RGB", (size, size), (248, 248, 248))
-        d = ImageDraw.Draw(im)
-        if busy:                                              # product already in a scene: no plain background
-            import random
-            r = random.Random(3)
-            for _ in range(500):
-                x, y = r.randrange(size), r.randrange(size)
-                d.rectangle([x, y, x + size // 10, y + size // 10], fill=(r.randrange(255), r.randrange(255), r.randrange(255)))
-        d.rectangle([size * 3 // 10, size // 5, size * 7 // 10, size * 4 // 5], fill=(20, 60, 200))
-        d.text((size // 2 - 40, size // 2), "TROIKA", fill=(255, 255, 255))
-        for i in range(0, 60, 6):
-            d.line([(size * 3 // 10 + 20, size // 4 + i * 8), (size * 7 // 10 - 20, size // 4 + i * 8)], fill=(200, 220, 255))
-        b = io.BytesIO(); im.save(b, "JPEG", quality=95); return b.getvalue()
+    im = Image.new("RGB", (1800, 1800), (248, 248, 248)); d = ImageDraw.Draw(im)
+    d.rectangle([540, 360, 1260, 1440], fill=(20, 60, 200)); d.text((860, 900), "TROIKA", fill=(255, 255, 255))
+    pb = io.BytesIO(); im.save(pb, "JPEG", quality=95)
     wb = openpyxl.Workbook(); ws = wb.active
-    ws.append(["SHOOT", "SHOTS"]); ws.append(["BBG64/GY", ""]); ws.append(["BBL64/BK", "1"])
+    ws.append(["SHOOT", "SHOTS"]); ws.append(["BBG64/GY", "1"])
     b = io.BytesIO(); wb.save(b)
     c.post("/api/library/upload", files=[("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "x/y")),
                                          ("files", ("eng_shoot.xlsx", b.getvalue(), "x/y")),
-                                         ("files", ("BBG64-GY front.jpg", photo(), "image/jpeg")),
-                                         ("files", ("BBL64-BK scene.jpg", photo(busy=True), "image/jpeg"))])
+                                         ("files", ("BBG64-GY front.jpg", pb.getvalue(), "image/jpeg"))])
     wait_job(c)
-    calls = {"edit": 0, "generate": 0, "qc": 0}
-    oe, og, oq = mock.MockProvider.edit, mock.MockProvider.generate, mock.MockProvider.qc
+    calls = {"edit": 0, "generate": 0, "qc": 0, "plan": 0}
+    oe, og, oq, op = mock.MockProvider.edit, mock.MockProvider.generate, mock.MockProvider.qc, mock.MockProvider.plan_product
     def e(self, *a, **k): calls["edit"] += 1; return oe(self, *a, **k)
-    def g(self, *a, **k): calls["generate"] += 1; return og(self, a[0], a[1], a[2], a[3] if len(a) > 3 else "1K")
+    def g(self, *a, **k): calls["generate"] += 1; return og(self, *a, **k)
     def q(self, *a, **k): calls["qc"] += 1; return oq(self, *a, **k)
-    mock.MockProvider.edit, mock.MockProvider.generate, mock.MockProvider.qc = e, g, q
+    def pl(self, *a, **k): calls["plan"] += 1; return op(self, *a, **k)
+    mock.MockProvider.edit, mock.MockProvider.generate, mock.MockProvider.qc, mock.MockProvider.plan_product = e, g, q, pl
     try:
-        c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": True, "auto_approve": False})
         c.post("/api/v2/load-shoot")
-        while pipeline.tick():
-            pass
+        st = c.get("/api/state").json()
+        pid = next(x["id"] for x in st["queue"] if x["code"] == "BBG64/GY")
+        c.post(f"/api/products/{pid}/run"); assert pipeline.tick()
     finally:
-        mock.MockProvider.edit, mock.MockProvider.generate, mock.MockProvider.qc = oe, og, oq
-        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
-    c.post("/api/autopilot", json={"pipeline_mode": "v2"})
-    st = c.get("/api/state").json()
-    allp = {x["code"]: x for x in st["queue"] + st["saved"]}
-    bl = c.get(f"/api/products/{allp['BBG64/GY']['id']}").json()
-    hows = {s["kind"]: s["qc"].get("how", {}) for s in bl["shots"] if s["image"]}
-    assert hows["hero"]["method"] == "edit" and hows["hero"]["exact"] is True
-    assert hows["detail"]["method"] == "crop" and hows["detail"]["exact"] is True
-    assert hows["use_case"]["method"] == "edit" and hows["lifestyle"]["method"] == "edit_zoom"
-    ye = c.get(f"/api/products/{allp['BBL64/BK']['id']}").json()
-    assert ye["shots"][0]["qc"]["how"]["method"] == "fresh"           # busy background -> fresh generation
-    assert calls["edit"] == 3 and calls["generate"] == 1               # detail crop needed no AI at all
-    assert calls["qc"] == 1                                            # only the fresh shot needed AI QC
-    img = c.get(bl["shots"][0]["image"]).content
+        mock.MockProvider.edit, mock.MockProvider.generate, mock.MockProvider.qc, mock.MockProvider.plan_product = oe, og, oq, op
+        c.put("/api/admin/settings", json={"engine_mode": "classic", "hero_real_pixels": False, "planner_on": True})
+    prod = c.get(f"/api/products/{pid}").json()
+    hero = prod["shots"][0]
+    assert hero["image"] and hero["qc"]["how"]["method"] == "fresh", hero["qc"]
+    assert hero["prompt"].startswith("REFERENCE IMAGES") and "SHOT 1 · HERO" in hero["prompt"]
+    assert calls["plan"] == 1 and calls["generate"] == 1 and calls["edit"] == 0 and calls["qc"] == 1, calls
+    assert prod["trace"]["plan"] is not None                  # the analysis ran although 'planner_on' was off
+    img = c.get(hero["image"]).content
     assert Image.open(io.BytesIO(img)).size == (1200, 1500)
-    c.post("/api/autopilot", json={"pipeline_mode": "v1"})
 
 
 def test_product_kit_angles_need_approval():
@@ -771,13 +746,20 @@ def test_shots_2_to_4_are_anchored_to_the_approved_hero():
     try:
         c.post(f"/api/products/{pid}/run"); pipeline.tick()
         hero_prompt = seen[0]["prompt"]
-        assert "[PRODUCT LOCK" in hero_prompt and "[CONSISTENCY WITH THE HERO]" not in hero_prompt
-        c.post(f"/api/products/{pid}/approve", json={}); pipeline.tick()
+        anchor = "The second image is our approved hero shot of the same product"
+        assert hero_prompt.startswith("REFERENCE IMAGES") and "PRODUCT - DO NOT CHANGE" in hero_prompt
+        assert anchor not in hero_prompt and seen[0]["style"] is None
+        c.post(f"/api/products/{pid}/approve", json={"make": [2, 3, 4]}); pipeline.tick()
         later = seen[1:]
-        assert len(later) == 3
+        prod = c.get(f"/api/products/{pid}").json()
+        assert all(s["image"] for s in prod["shots"])
+        generated = [s for s in prod["shots"][1:] if s["qc"]["how"]["method"] == "fresh"]
+        assert len(later) == len(generated) >= 1               # a supplied photo that fits a slot is reused instead
         for g in later:
-            assert "[CONSISTENCY WITH THE HERO]" in g["prompt"] and g["refs"] >= 1 and g["style"] is None
+            assert anchor in g["prompt"] and g["refs"] >= 1 and g["style"] is None
             assert "pro" in g["model"]                     # Max mode: the best model for every shot
+        for s in generated:
+            assert s["sent_hero"]
     finally:
         mock.MockProvider.generate = og
 
@@ -865,13 +847,13 @@ def test_planner_verifies_photos_plans_shots_and_gates_review():
         seen.append(prompt); return og(self, prompt, raw, model, size, refs, style)
     mock.MockProvider.generate = g
     try:
-        c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": True, "auto_approve": False})
+        c.post("/api/autopilot", json={"autopilot": True, "auto_approve": False})
         c.post("/api/v2/load-shoot")
         while pipeline.tick():
             pass
     finally:
         mock.MockProvider.generate = og
-        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+        c.post("/api/autopilot", json={"autopilot": False})
     row = next(r for r in c.get("/api/library").json()["rows"] if r["code"] == "KR18-05/BR")
     assert row["plan"]["status"] == "ok" and set(row["plan"]["json"]["shots"]) == {"hero", "detail", "use_case", "lifestyle"}
     assert len(row["discarded"]) == 1 and len(row["all"]) == 1                    # the red one is another colourway
@@ -1006,37 +988,6 @@ def test_website_reader_ladder_and_brand_reset():
     with SessionLocal() as s:
         assert s.query(LibProduct).count() == before
         assert not list(s.scalars(select(LibImage).where(LibImage.key == "KR1805BR")))
-
-
-def test_hybrid_hero_keeps_real_pixels_for_clean_packshot():
-    import io, openpyxl
-    from PIL import Image, ImageDraw
-    c = client()
-    c.post("/api/library/clear")
-    c.put("/api/admin/settings", json={"engine_mode": "hybrid", "planner_on": True, "plan_review": "never", "hero_real_pixels": True,
-                                       "max_cost_product": 5, "daily_budget": 100, "default_shots": [1], "hero_gate": False,
-                                       "retries": 0, "model_hero": "", "escalate_model": ""})
-    im = Image.new("RGB", (1600, 2000), (248, 248, 248)); ImageDraw.Draw(im).rectangle([500, 500, 1100, 1500], fill=(20, 60, 200))
-    b = io.BytesIO(); im.save(b, "JPEG", quality=95)
-    wb = openpyxl.Workbook(); ws = wb.active; ws.append(["SHOOT", "SHOTS"]); ws.append(["KR18/05/BR", "1"]); sb = io.BytesIO(); wb.save(sb)
-    c.post("/api/library/upload", files=[("files", ("master.xlsx", (Path(__file__).parent / "library" / "master.xlsx").read_bytes(), "x/y")),
-                                         ("files", ("hy_shoot.xlsx", sb.getvalue(), "x/y")),
-                                         ("files", ("KR18-05-BR front.jpg", b.getvalue(), "image/jpeg"))])
-    wait_job(c)
-    try:
-        c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": True, "auto_approve": False})
-        c.post("/api/v2/load-shoot")
-        while pipeline.tick():
-            pass
-    finally:
-        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
-        c.put("/api/admin/settings", json={"engine_mode": "classic"})
-    from app.db import SessionLocal, Product
-    with SessionLocal() as s:
-        p = next(x for x in s.query(Product).all() if (x.data or {}).get("lib_key") == "KR1805BR")
-        hero = next(sh for sh in p.shots if sh.no == 1)
-        assert hero.image_path and (hero.qc or {}).get("how", {}).get("method") == "edit" and hero.qc["how"]["exact"]
-
 
 
 def test_openrouter_switched_off_means_gemini_only():
@@ -1309,12 +1260,12 @@ def test_input_photo_reused_for_a_slot_without_generation():
                                          ("files", ("KR18-05-BR REUSEME.jpg", b.getvalue(), "image/jpeg"))])
     wait_job(c)
     try:
-        c.post("/api/autopilot", json={"pipeline_mode": "v2", "autopilot": True, "auto_approve": False})
+        c.post("/api/autopilot", json={"autopilot": True, "auto_approve": False})
         c.post("/api/v2/load-shoot")
         while pipeline.tick():
             pass
     finally:
-        c.post("/api/autopilot", json={"pipeline_mode": "v1", "autopilot": False})
+        c.post("/api/autopilot", json={"autopilot": False})
     from app.db import SessionLocal, Product
     from PIL import Image as _I
     from app.connectors import storage as _st

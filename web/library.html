@@ -169,7 +169,7 @@ function kit(r){const k=r.kit||{missing:[],pending:[],real_angles:[]};const pend
   return `<div class="kitbox"><div class="hint"><b>Product Kit</b> · real angles: ${k.real_angles.length?esc(k.real_angles.join(", ")):"not tagged yet"}${appr.length?` · approved AI views: ${appr.map(i=>esc(i.angle)).join(", ")}`:""}</div>
   ${pend.length?`<div class="kitrow">${pend.map(i=>`<figure><img src="${esc(i.src)}" alt="AI ${esc(i.angle)} view"><figcaption>${esc(i.angle)} view</figcaption><div class="acts"><button class="btn sm primary" data-act="kit_approve" data-id="${i.id}" type="button">✓ Same product</button><button class="btn sm danger" data-act="kit_reject" data-id="${i.id}" type="button">✕ Not right</button></div></figure>`).join("")}</div>`:""}
   ${!pend.length&&k.missing.length?`<div class="acts"><button class="btn sm" data-kit="${esc(r.key)}" type="button" title="AI makes the missing views once; you approve them">Make ${k.missing.map(esc).join(" + ")} view${k.missing.length>1?"s":""} (≈ ₹${2*k.missing.length}, once)</button></div>`:""}</div>`}
-const SHN={hero:"1 · Hero",detail:"2 · Detail",use_case:"3 · Use case",lifestyle:"4 · Lifestyle"};
+const SHN={hero:"1 · Hero",lifestyle:"2 · Lifestyle",use_case:"3 · Use case",detail:"4 · Detail"};
 const J=v=>Array.isArray(v)?v.map(x=>typeof x=="object"&&x?Object.values(x).filter(Boolean).join(" "):x).join(", "):typeof v=="object"&&v?Object.values(v).filter(Boolean).join(" · "):(v??"");
 function plan(r){const rec=r.plan;
   if(!rec)return `<div class="acts"><button class="btn sm primary" data-plan="${esc(r.key)}" type="button" title="Best model: checks the photos, understands the product, plans the 4 shots">Analyse &amp; plan (≈ ₹2-3, once)</button></div>`;

@@ -179,29 +179,28 @@ def _prep_one(s: Session, it: dict, n_it: int, total: int, deadline: float, use_
         prep.update(state="needs_photo", why="No photo on the website or in Raw input for this code")
         it["prep"] = prep
         return it
-    # 3 analysis (best model)
-    if get_setting(s, "planner_on", True):
-        rec = (lp.data or {}).get("plan")
-        if not rec or rec.get("stale") or rec.get("status") != "ok":
-            try:
-                rec = planner.make_plan(s, it["key"], get_provider())
-                from .db import Usage
-                from . import config
-                s.add(Usage(kind="plan", model=rec["model"], cost=config.COST_PLANNER))
-                s.commit()
-            except Exception as e:
-                s.rollback()
-                prep.update(state="error", why=f"Analysis failed: {str(e)[:160]}")
-                it["prep"] = prep
-                return it
-        if rec.get("status") != "ok":
-            prep.update(state="needs_photo", why="Every photo was discarded by the analysis")
+    # 3 analysis (best model): always, it is what every prompt is written from
+    rec = (lp.data or {}).get("plan")
+    if not rec or rec.get("stale") or rec.get("status") != "ok":
+        try:
+            rec = planner.make_plan(s, it["key"], get_provider())
+            from .db import Usage
+            from . import config
+            s.add(Usage(kind="plan", model=rec["model"], cost=config.COST_PLANNER))
+            s.commit()
+        except Exception as e:
+            s.rollback()
+            prep.update(state="error", why=f"Analysis failed: {str(e)[:160]}")
             it["prep"] = prep
             return it
-        if planner.needs_review(s, rec):
-            prep.update(state="review", why=planner.review_reason(rec))
-            it["prep"] = prep
-            return it
+    if rec.get("status") != "ok":
+        prep.update(state="needs_photo", why="Every photo was discarded by the analysis")
+        it["prep"] = prep
+        return it
+    if planner.needs_review(s, rec):
+        prep.update(state="review", why=planner.review_reason(rec))
+        it["prep"] = prep
+        return it
     prep.update(state="ready", why="")
     it["prep"] = prep
     return it

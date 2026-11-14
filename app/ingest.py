@@ -42,7 +42,7 @@ def _add_product(s: Session, src: Source, code: str, raw: bytes | None, name="",
         return None
     p = Product(code=code, name=name or code, brand_id=brand if brand != "_default" else (data.get("brand_id") or ""),
                 category_id=data.get("category_id", ""), colourway=data.get("colourway") or "standard",
-                data=data, source_id=src.id, stage="queue" if raw else "needs_photo")
+                data={**data, "v2": True}, source_id=src.id, stage="queue" if raw else "needs_photo")
     if raw:
         p.raw_path = storage.save(f"raw/{storage.safe(code)}.jpg", storage.normalise_raw(raw))
     s.add(p)
@@ -60,8 +60,18 @@ def _pick_best(files: list[dict]) -> dict[str, dict]:
     best = {}
     for code, lst in groups.items():
         lst.sort(key=lambda a: ANGLE_ORDER.index(a[0]) if a[0] in ANGLE_ORDER else 99)
-        best[code] = {**lst[0][1], "angles": [a for a, _ in lst]}
+        best[code] = {**lst[0][1], "angles": [a for a, _ in lst], "all": [f for _, f in lst]}
     return best
+
+
+def _file_in_library(s: Session, code: str, photos: list[tuple[str, bytes]]):
+    """Every photo found for this code (all angles, not only the best one) is filed in the Library under the code, so
+    the product is analysed from all of them like any other."""
+    from .library import adopt_product
+    p = _existing(s).get(code)
+    if p is not None:
+        s.flush()
+        adopt_product(s, p, photos)
 
 
 # ------------------------------------------------------------------ per type
@@ -82,6 +92,7 @@ def ingest_files(s: Session, src: Source, files: list[tuple[str, bytes]]) -> int
     for code, f in best.items():
         if _add_product(s, src, code, f["data"], hint_text=f["name"]):
             n += 1
+        _file_in_library(s, code, [(x["name"], x["data"]) for x in f["all"]])
     return n
 
 
@@ -95,8 +106,11 @@ def ingest_drive(s: Session, src: Source) -> int:
     for code, f in best.items():
         if code in have and have[code].raw_path:
             continue
-        if _add_product(s, src, code, google.download(f["id"]), hint_text=f"{f['folder']} {f['name']}"):
+        raw = google.download(f["id"])
+        if _add_product(s, src, code, raw, hint_text=f"{f['folder']} {f['name']}"):
             n += 1
+        others = [(x["name"], google.download(x["id"])) for x in f["all"] if x["id"] != f["id"]]
+        _file_in_library(s, code, [(f["name"], raw)] + others)
     seen = set(src.config.get("seen_pdfs", []))
     for f in pdfs:
         if f["id"] not in seen:

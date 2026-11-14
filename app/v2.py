@@ -82,13 +82,9 @@ def load_items(s: Session, items: list[dict]) -> dict:
         key = it.get("key")
         lp = s.scalar(select(LibProduct).where(LibProduct.key == key)) if key else None
         img = s.scalar(select(LibImage).where(LibImage.key == key, LibImage.primary == True)) if key else None  # noqa: E712
-        from .library import cutouts_on, refs_for
-        engine = "composite" if cutouts_on(s) else "ai"
-        if engine == "ai":
-            q = (img.meta or {}) if img else {}
-            ready = bool(img and img.cut_status != "skip" and (not q.get("flags") or q.get("override")))
-        else:
-            ready = bool(img and img.cut_path and img.cut_status in ("ok", "check"))
+        from .library import refs_for
+        q = (img.meta or {}) if img else {}
+        ready = bool(img and img.cut_status != "skip" and (not q.get("flags") or q.get("override")))
         p = existing.get(key) if key else None
         if p is None:
             p = Product(code=(lp.product_id if lp else it["code"])[:80])
@@ -107,16 +103,13 @@ def load_items(s: Session, items: list[dict]) -> dict:
         p.category_id = category_for(s, text)
         p.data = {**(p.data or {}), "v2": True, "lib_key": key or "", "shots": it.get("shots") or [],
                   "note": it.get("note", ""), "priority": it.get("priority", n + 1), "brand_label": lp.brand if lp else "",
-                  "cutout": img.cut_path if ready and engine == "composite" else "", "paused": False,
-                  "engine": engine, "refs": refs_for(s, key) if (ready and key) else []}
+                  "paused": False, "refs": refs_for(s, key) if (ready and key) else []}
         if not key:
             p.stage, p.error = "error", f"{it['code']} is not in the master sheet"
             missing += 1
         elif not ready:
             p.stage, p.error = "needs_photo", ("Photo " + " and ".join((img.meta or {}).get("flags", [])) + ": add a better one or press 'Use anyway' in the Library"
-                                               if img and engine == "ai" and (img.meta or {}).get("flags") else
-                                               "Waiting for its cut-out on the Library page" if img and engine == "composite"
-                                               else "No photo in the Library for this code")
+                                               if img and (img.meta or {}).get("flags") else "No photo in the Library for this code")
             waiting += 1
         else:
             p.raw_path, p.stage, p.error = img.path, ("queue" if p.stage in ("needs_photo", "error", "queue", "") else p.stage), ""

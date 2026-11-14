@@ -10,7 +10,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import config
 from .auth import RANK, current_user, hash_pw, login, need, new_token
 from .connectors import storage
-from .dataset import LIB_TABLES, build_prompts, live_rules, seed
+from .dataset import LIB_TABLES, live_rules, seed
 from .db import (Activity, LibraryRow, Product, Repository, RuleVersion, SessionLocal, Shot, Source, Usage, User,
                  get_setting, init_db, log, now, set_setting)
 from . import ingest, pipeline, secrets
@@ -225,7 +225,7 @@ def state(u=Depends(need("viewer"))):
         spend_today = float(s.scalar(select(func.coalesce(func.sum(Usage.cost), 0.0)).where(Usage.ts >= today)) or 0)
         prods = list(s.scalars(select(Product).where(Product.stage != "rejected").order_by(Product.id)))
         srcs = list(s.scalars(select(Source).order_by(Source.id.desc())))
-        mode = get_setting(s, "pipeline_mode", "v1")
+        mode = "v2"                                       # one flow: every product goes through the Library and its analysis
         counts = {}
         for p in prods:
             counts.setdefault(p.source_id, 0)
@@ -240,9 +240,9 @@ def state(u=Depends(need("viewer"))):
             "sources": [{"id": x.id, "type": x.type, "name": x.name, "detail": x.detail, "watch": x.watch,
                          "status": x.status, "error": x.error, "count": counts.get(x.id, 0)} for x in srcs],
             "queue": sorted([product_brief(p) for p in prods if p.stage in ("queue", "gen", "review", "error", "needs_photo")
-                             and bool((p.data or {}).get("v2")) == (mode == "v2")],
+                             and (p.data or {}).get("v2")],
                             key=lambda q: (q["priority"] if q["priority"] is not None else 10_000, q["id"])),
-            "pipeline_mode": mode, "v2": v2_summary(s) if mode == "v2" else None,
+            "pipeline_mode": mode, "v2": v2_summary(s),
             "saved": [product_brief(p) for p in reversed(prods) if p.stage == "saved"][:200],
         }
 
@@ -256,7 +256,8 @@ def product(pid: int, u=Depends(need("viewer"))):
         shots = {sh.no: sh for sh in p.shots}
         return {**product_brief(p), "raw": img_url(p.raw_path), "analysis": p.analysis, "data": p.data, "cost": round(p.cost, 3),
                 "category": p.category_id, "shopify_id": p.shopify_id,
-                "shots": [{"no": no, "kind": kind, "status": shots[no].status if no in shots else "wait",
+                "shots": [{"no": no, "kind": (shots[no].kind if no in shots else kind),      # the label follows the stored shot
+                           "status": shots[no].status if no in shots else "wait",
                            "image": img_url(shots[no].image_path) if no in shots else "",
                            "qc": shots[no].qc if no in shots else {}, "attempts": shots[no].attempts if no in shots else 0,
                            "model": shots[no].model if no in shots else "",
@@ -396,11 +397,8 @@ class AutoIn(BaseModel):
 def autopilot(body: AutoIn, u=Depends(need("editor"))):
     with SessionLocal() as s:
         for k, v in body.model_dump(exclude_none=True).items():
-            set_setting(s, k, v)
-        if body.pipeline_mode is not None:
-            if body.pipeline_mode not in ("v1", "v2"):
-                raise HTTPException(400, "pipeline_mode must be v1 or v2")
-            log(s, u.email, "Pipeline switched to " + body.pipeline_mode)
+            if k != "pipeline_mode":                      # there is one flow now; an old switch value is ignored
+                set_setting(s, k, v)
         if body.autopilot:
             pipeline.STOP.clear()
         if body.autopilot is not None:
@@ -440,11 +438,8 @@ def approve(pid: int, body: ApproveIn | None = None, u=Depends(need("editor"))):
         p = _get(s, pid)
         if not any(sh.image_path for sh in p.shots):
             raise HTTPException(400, "Nothing generated yet")
-        missing = [sh.no for sh in p.shots if not sh.image_path]
-        if (p.data or {}).get("v2"):
-            from .v2 import requested_shots
-            have = {sh.no for sh in p.shots if sh.image_path}
-            missing = [n for n in requested_shots(s, p) if n not in have]
+        have = {sh.no for sh in p.shots if sh.image_path}
+        missing = [n for n in pipeline.requested_shots(s, p) if n not in have]
         if body.make:
             have = {sh.no for sh in p.shots if sh.image_path}
             missing = sorted({int(n) for n in body.make if int(n) in pipeline.SHOT_NAMES and int(n) not in have})
@@ -600,14 +595,31 @@ def rollback(version: int, u=Depends(need("admin"))):
 
 
 @app.get("/api/admin/rules/preview")
-def preview(shot: int = 2, product_id: int | None = None, draft: bool = True, u=Depends(need("admin"))):
+def preview(shot: int = 1, product_id: int | None = None, draft: bool = True, u=Depends(need("admin"))):
+    """The prompt that is really sent for this product and slot: written from its analysed plan, the fixed slot rules
+    and the house look. (The old rule-sheet preview showed a prompt that generation never used.)"""
+    from . import planner
+    from .db import LibProduct as _LP
     with SessionLocal() as s:
-        rv = (s.scalars(select(RuleVersion).where(RuleVersion.status.in_(["draft", "pending"]))).first() if draft else None) or live_rules(s)
-        p = s.get(Product, product_id) if product_id else s.scalars(select(Product).order_by(Product.id.desc())).first()
+        kind = pipeline.SHOT_NAMES.get(max(1, min(4, shot)), "hero")
+        cands = [s.get(Product, product_id)] if product_id else list(s.scalars(select(Product).order_by(Product.id.desc()).limit(60)))
+        p = lp = rec = None
+        for c in cands:                                   # the most recent product that has been analysed
+            if c is None:
+                continue
+            l = s.scalar(select(_LP).where(_LP.key == ((c.data or {}).get("lib_key") or "")))
+            r = ((l.data or {}).get("plan") if l else None) or {}
+            p = p or c
+            if r.get("status") == "ok":
+                p, lp, rec = c, l, r
+                break
         if not p:
             return {"prompt": "Add a product first to preview its prompt."}
-        out = build_prompts(s, p, p.analysis or {}, rv)
-        return {"product": p.code, "version": rv.version, "prompt": out[max(0, min(4, shot - 1))]["prompt"]}
+        if not rec:
+            return {"product": p.code, "version": 0, "prompt": "This product has not been analysed yet. Its prompt is written from the analysis."}
+        return {"product": p.code, "version": 0, "kind": kind,
+                "prompt": planner.render(planner.for_product(rec["json"], lp), kind, planner.static_rules(s), anchored=kind != "hero",
+                                         look=planner.house_look(s))}
 
 
 # ---------------------------------------------------------------- admin: library
@@ -1120,9 +1132,8 @@ class MoveIn(BaseModel):
 def move(pid: int, body: MoveIn, u=Depends(need("editor"))):
     with SessionLocal() as s:
         p = _get(s, pid)
-        v2flag = bool((p.data or {}).get("v2"))
         q = [x for x in s.scalars(select(Product).where(Product.stage.in_(["queue", "gen", "review", "error", "needs_photo"])))
-             if bool((x.data or {}).get("v2")) == v2flag]
+             if (x.data or {}).get("v2")]
         q.sort(key=lambda x: ((x.data or {}).get("priority", 10_000), x.id))
         i = q.index(p)
         j = {"up": max(0, i - 1), "down": min(len(q) - 1, i + 1), "top": 0, "bottom": len(q) - 1}.get(body.to, i)

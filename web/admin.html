@@ -84,7 +84,7 @@ pre.prompt{margin:0;font-family:var(--f-mono);font-size:12px;line-height:1.55;wh
         </section>
         <section class="panel">
           <div class="panel-h"><h2>Live prompt preview</h2>
-            <div class="field" style="flex-direction:row;align-items:center;gap:8px"><label for="pv-shot">Shot</label><select id="pv-shot" style="min-height:32px;padding:4px 8px"><option value="1">1 Hero</option><option value="2" selected>2 Use case</option><option value="3">3 Detail</option><option value="4">4 Arrangement</option><option value="5">5 Lifestyle</option></select></div>
+            <div class="field" style="flex-direction:row;align-items:center;gap:8px"><label for="pv-shot">Shot</label><select id="pv-shot" style="min-height:32px;padding:4px 8px"><option value="1" selected>1 Hero</option><option value="2">2 Lifestyle</option><option value="3">3 Use case</option><option value="4">4 Detail</option></select></div>
           </div>
           <pre class="prompt" id="prompt">Loading…</pre>
           <p class="hint" id="pv-for" style="margin:8px 0 0"></p>
@@ -147,9 +147,9 @@ pre.prompt{margin:0;font-family:var(--f-mono);font-size:12px;line-height:1.55;wh
           <p class="hint" style="margin:0 0 8px">Gemini: <span class="mono">gemini-3-pro-image</span>, <span class="mono">gemini-nano-banana-2.1</span>. OpenRouter: start with <span class="mono">openrouter:</span>, e.g. <span class="mono">openrouter:black-forest-labs/flux.2-pro:free</span>.</p>
           <div class="form2">
             <div class="field"><label for="s-model_hero">1 · Hero</label><input id="s-model_hero" class="mono" data-setting="model_hero"></div>
-            <div class="field"><label for="s-model_detail">2 · Detail</label><input id="s-model_detail" class="mono" data-setting="model_detail"></div>
+            <div class="field"><label for="s-model_lifestyle">2 · Lifestyle</label><input id="s-model_lifestyle" class="mono" data-setting="model_lifestyle"></div>
             <div class="field"><label for="s-model_use_case">3 · Use case</label><input id="s-model_use_case" class="mono" data-setting="model_use_case"></div>
-            <div class="field"><label for="s-model_lifestyle">4 · Lifestyle</label><input id="s-model_lifestyle" class="mono" data-setting="model_lifestyle"></div>
+            <div class="field"><label for="s-model_detail">4 · Detail</label><input id="s-model_detail" class="mono" data-setting="model_detail"></div>
             <div class="field"><label for="s-escalate_model">If QC fails, retry once with (blank = no upgrade)</label><input id="s-escalate_model" class="mono" data-setting="escalate_model" placeholder="gemini-3-pro-image"></div>
           </div>
           <div class="toolbar" style="margin-top:12px"><button class="btn" type="button" data-save-settings>Save models</button></div>
@@ -254,7 +254,7 @@ loaders.rules=run(async()=>{R=await api("/api/admin/rules");const d=work(),st=d.
   $("#shots").innerHTML=d.shot_directions.shots.map((s,i)=>!s.camera?`<tr><td>${s.no}</td><td>${esc(s.id)}</td><td colspan="3" class="hint">${esc(s.mode_rule||"Two modes: macro or feature callout")}</td></tr>`:`<tr><td>${s.no}</td><td>${esc(s.id)}</td><td><input aria-label="Camera for shot ${s.no}" data-shot="${i}" data-f="camera" value="${esc(s.camera||"")}" style="width:100%;min-width:180px;border:1px solid var(--line);border-radius:4px;padding:6px;background:var(--surface)"></td><td><input aria-label="Framing for shot ${s.no}" data-shot="${i}" data-f="framing" value="${esc(s.framing||"")}" style="width:100%;min-width:180px;border:1px solid var(--line);border-radius:4px;padding:6px;background:var(--surface)"></td><td class="hint">${esc(s.props||"")}</td></tr>`).join("");
   $("#versions").innerHTML=R.history.map(h=>`<tr><td class="mono">v${h.version}</td><td><span class="chip ${h.status=="live"?"ok":h.status=="pending"?"warn":"mute"}">${h.status}</span></td><td>${esc(h.by)}</td><td>${esc(h.approved_by)}</td><td>${h.status=="archived"?`<button class="btn sm" type="button" data-rollback="${h.version}">Restore as draft</button>`:""}</td></tr>`).join("");
   preview()});
-const preview=run(async()=>{const r=await api("/api/admin/rules/preview?shot="+$("#pv-shot").value);$("#prompt").textContent=r.prompt;$("#pv-for").textContent=r.product?`Preview for ${r.product} with rules v${r.version}`:""});
+const preview=run(async()=>{const r=await api("/api/admin/rules/preview?shot="+$("#pv-shot").value);$("#prompt").textContent=r.prompt;$("#pv-for").textContent=r.product?`The prompt actually sent for ${r.product}, written from its analysis`:""});
 $("#pv-shot").addEventListener("change",preview);
 const saveDraft=run(async data=>{await api("/api/admin/rules/draft",{method:"PUT",body:{data}});toast("Saved to draft");loaders.rules()});
 document.addEventListener("click",e=>{const b=e.target.closest("[data-str]");if(b){const st={...(work().strength||{}),[b.dataset.str]:b.dataset.v};saveDraft({strength:st})}
