@@ -626,8 +626,10 @@ def save_cutout(s: Session, img: LibImage, png: bytes) -> LibImage:
 
 
 def cutouts_on(s: Session) -> bool:
-    """Cut-outs are only needed for the composite engine. The default keeps original photos untouched."""
-    return bool(get_setting(s, "library_cutouts", False))
+    """The cut-out + composite engine is retired: every product keeps its original photos and goes through the
+    one analysis + generation path. Kept as a function (not inlined to True/False at each call site) only so the
+    handful of callers that still branch on it don't need to change."""
+    return False
 
 
 def pending(s: Session, limit: int = 50) -> list[LibImage]:

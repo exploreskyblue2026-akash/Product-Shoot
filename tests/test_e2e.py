@@ -85,14 +85,8 @@ def test_full_flow():
 
 def test_admin():
     c = client()
-    rules = c.get("/api/admin/rules").json()
-    assert rules["live"]["version"] == 1
-    c.put("/api/admin/rules/draft", json={"data": {"strength": {"lighting": "normal"}}})
     pv = c.get("/api/admin/rules/preview?shot=2").json()
     assert pv["kind"] == "lifestyle" and "SHOT 2 · LIFESTYLE" in pv["prompt"] and "[1 STUDIO STANDARD" not in pv["prompt"]
-    assert c.post("/api/admin/rules/submit").json()["ok"]
-    assert c.post("/api/admin/rules/approve").json()["ok"]   # single admin may approve their own change
-    assert c.get("/api/admin/rules").json()["live"]["version"] == 2
     assert len(c.get("/api/admin/library/brands").json()) >= 4
     c.put("/api/admin/library/brands/lamy", json={"brand_name": "LAMY", "detect_keywords": "lamy"})
     assert any(b["brand_id"] == "lamy" for b in c.get("/api/admin/library/brands").json())
@@ -224,11 +218,10 @@ def test_approve_hero_then_rest_stop_and_remove():
 
 
 def test_library_phase1():
-    """Master + shoot sheet + photos: matched by code, duplicates dropped, cut-out saved and checked, tray assign, report."""
+    """Master + shoot sheet + photos: matched by code, duplicates dropped, tray assign, report."""
     import io, time
     from PIL import Image
     c = client()
-    c.put("/api/admin/settings", json={"library_cutouts": True})
     LIB = Path(__file__).parent / "library"
     def png(color, size=(900, 900), alpha=False):
         im = Image.new("RGBA" if alpha else "RGB", size, (255, 255, 255, 0) if alpha else (255, 255, 255))
@@ -253,19 +246,14 @@ def test_library_phase1():
     assert st["shoot"] == 13
     assert rows["TRV20/GY"]["images"] == 1 and rows["TRV20/GY"]["dups"] == 1
     assert rows["TRV20/GY"]["primary"]["w"] == 900
-    assert rows["PEN20/SI"]["status"] == "cutting" and rows["PIP25/BL"]["status"] == "needs_photo"
+    assert rows["PEN20/SI"]["status"] == "ready" and rows["PIP25/BL"]["status"] == "needs_photo"
     assert len(st["unmatched"]) == 1
-    pend = c.get("/api/library/pending").json()
-    assert {"TRV20GY", "PEN20SI"} <= {p["key"] for p in pend}
-    gid = next(p["id"] for p in pend if p["key"] == "TRV20GY")
-    r = c.post(f"/api/library/images/{gid}/cutout", files={"file": ("x.png", png((20, 20, 20), alpha=True), "image/png")}).json()
-    assert r["status"] == "ok", r
-    assert c.get("/api/library").json()["counts"]["ready"] == 1
+    assert c.get("/api/library/pending").json() == []          # the cut-out engine is retired: nothing is ever pending
     # tray: assign the unknown photo to PIP25/BL
     uid = st["unmatched"][0]["id"]
     assert c.post(f"/api/library/images/{uid}", json={"action": "assign", "code": "pip25-bl"}).json()["ok"]
     rows = {r["code"]: r for r in c.get("/api/library").json()["rows"]}
-    assert rows["PIP25/BL"]["status"] == "cutting"
+    assert rows["PIP25/BL"]["status"] == "ready"
     csv = c.get("/api/library/report.csv").text
     assert "TRV20/GY" in csv and "ready" in csv
     assert c.get("/library").status_code == 200

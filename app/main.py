@@ -10,8 +10,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import config
 from .auth import RANK, current_user, hash_pw, login, need, new_token
 from .connectors import storage
-from .dataset import LIB_TABLES, live_rules, seed
-from .db import (Activity, LibraryRow, Product, Repository, RuleVersion, SessionLocal, Shot, Source, Usage, User,
+from .dataset import LIB_TABLES, seed
+from .db import (Activity, LibraryRow, Product, Repository, SessionLocal, Shot, Source, Usage, User,
                  get_setting, init_db, log, now, set_setting)
 from . import ingest, pipeline, secrets
 
@@ -208,14 +208,9 @@ def v2_summary(s) -> dict:
     from .db import LibImage as _LI
     items = get_setting(s, "shoot_list", []) or []
     keys = [i["key"] for i in items if i.get("key")]
-    from .library import cutouts_on
-    ok = ["ok", "check"] if cutouts_on(s) else ["pending", "ok", "check"]
     ready = sum(1 for k in keys if s.scalar(select(_LI).where(_LI.key == k, _LI.primary == True,  # noqa: E712
-                                                                 _LI.cut_status.in_(ok))))
-    from .db import SceneAsset
-    return {"shoot": len(items), "in_master": len(keys), "ready": ready,
-            "scenes": s.scalar(select(func.count(SceneAsset.id)).where(SceneAsset.retired == False)) or 0,  # noqa: E712
-            "strategy": get_setting(s, "scene_strategy", "auto"), "cutouts": cutouts_on(s)}
+                                                                 _LI.cut_status.in_(["pending", "ok", "check"]))))
+    return {"shoot": len(items), "in_master": len(keys), "ready": ready, "cutouts": False}
 
 
 @app.get("/api/state")
@@ -518,84 +513,9 @@ def reject(pid: int, u=Depends(need("editor"))):
     return {"ok": True}
 
 
-# ---------------------------------------------------------------- admin: rules
-def _rv(r: RuleVersion) -> dict:
-    return {"id": r.id, "version": r.version, "status": r.status, "data": r.data, "created_by": r.created_by,
-            "approved_by": r.approved_by, "created": r.created.isoformat()}
-
-
-@app.get("/api/admin/rules")
-def rules(u=Depends(need("admin"))):
-    with SessionLocal() as s:
-        rows = list(s.scalars(select(RuleVersion).order_by(RuleVersion.version.desc())))
-        live = next((r for r in rows if r.status == "live"), None)
-        draft = next((r for r in rows if r.status in ("draft", "pending")), None)
-        return {"live": _rv(live), "draft": _rv(draft) if draft else None,
-                "history": [{"version": r.version, "status": r.status, "by": r.created_by, "approved_by": r.approved_by,
-                             "created": r.created.isoformat()} for r in rows]}
-
-
-class DraftIn(BaseModel):
-    data: dict
-
-
-@app.put("/api/admin/rules/draft")
-def save_draft(body: DraftIn, u=Depends(need("admin"))):
-    with SessionLocal() as s:
-        draft = s.scalars(select(RuleVersion).where(RuleVersion.status.in_(["draft", "pending"]))).first()
-        if not draft:
-            top = s.scalar(select(func.max(RuleVersion.version)))
-            draft = RuleVersion(version=(top or 0) + 1, status="draft", data=live_rules(s).data, created_by=u.email)
-            s.add(draft)
-        merged = {**draft.data, **body.data}
-        draft.data, draft.status, draft.created_by = merged, "draft", u.email
-        s.commit()
-        return _rv(draft)
-
-
-@app.post("/api/admin/rules/submit")
-def submit(u=Depends(need("admin"))):
-    with SessionLocal() as s:
-        d = s.scalars(select(RuleVersion).where(RuleVersion.status == "draft")).first()
-        if not d:
-            raise HTTPException(400, "No draft to send")
-        d.status = "pending"
-        log(s, u.email, f"Sent rules v{d.version} for approval")
-        s.commit()
-    return {"ok": True}
-
-
-@app.post("/api/admin/rules/approve")
-def approve_rules(u=Depends(need("admin"))):
-    with SessionLocal() as s:
-        d = s.scalars(select(RuleVersion).where(RuleVersion.status == "pending")).first()
-        if not d:
-            raise HTTPException(400, "Nothing waiting for approval")
-        admins = s.scalar(select(func.count()).select_from(User).where(User.role.in_(["admin", "owner"]), User.active == True))  # noqa
-        if d.created_by == u.email and admins > 1:
-            raise HTTPException(403, "A second admin must approve this change")
-        for r in s.scalars(select(RuleVersion).where(RuleVersion.status == "live")):
-            r.status = "archived"
-        d.status, d.approved_by = "live", u.email
-        log(s, u.email, f"Rules v{d.version} are live")
-        s.commit()
-    return {"ok": True}
-
-
-@app.post("/api/admin/rules/rollback/{version}")
-def rollback(version: int, u=Depends(need("admin"))):
-    with SessionLocal() as s:
-        old = s.scalars(select(RuleVersion).where(RuleVersion.version == version)).first()
-        if not old:
-            raise HTTPException(404, "Version not found")
-        top = s.scalar(select(func.max(RuleVersion.version)))
-        s.add(RuleVersion(version=top + 1, status="draft", data=old.data, created_by=u.email))
-        s.commit()
-    return {"ok": True}
-
-
+# ---------------------------------------------------------------- admin: live prompt preview
 @app.get("/api/admin/rules/preview")
-def preview(shot: int = 1, product_id: int | None = None, draft: bool = True, u=Depends(need("admin"))):
+def preview(shot: int = 1, product_id: int | None = None, u=Depends(need("admin"))):
     """The prompt that is really sent for this product and slot: written from its analysed plan, the fixed slot rules
     and the house look. (The old rule-sheet preview showed a prompt that generation never used.)"""
     from . import planner
@@ -700,11 +620,11 @@ def test_conn(what: str, u=Depends(need("admin"))):
     raise HTTPException(404)
 
 
-SETTING_KEYS = ["engine_mode", "library_autoscan", "library_focus", "library_drive_copy", "library_cutouts", "pipeline_mode", "scene_strategy", "scene_reuse", "fresh_brands", "auto_approve", "retries", "publish_shopify", "shopify_replace_images", "budget_month", "budget_action", "model_hero_detail",
+SETTING_KEYS = ["library_autoscan", "library_focus", "library_drive_copy", "auto_approve", "retries", "publish_shopify", "shopify_replace_images", "budget_month", "budget_action", "model_hero_detail",
                 "model_other", "file_naming", "min_raw_px", "output_drive_folder", "cost_mode", "default_shots",
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr",
                 "model_hero", "model_detail", "model_use_case", "model_lifestyle", "escalate_model",
-                "planner_on", "plan_review", "model_planner", "hero_real_pixels", "reuse_inputs", "max_attempts_shot", "prep_workers", "reuse_min_px", "model_edit", "static_rules", "house_look", "hero_review",
+                "plan_review", "model_planner", "hero_real_pixels", "reuse_inputs", "max_attempts_shot", "prep_workers", "reuse_min_px", "model_edit", "static_rules", "house_look", "hero_review",
                 "use_openrouter", "use_shopify", "use_drive", "use_websites", "auto_prepare", "auto_send_studio", "store_first"]
 
 
@@ -716,7 +636,6 @@ def get_settings(u=Depends(need("admin"))):
         out["static_rules"] = static_rules(s)
         from .planner import house_look
         out["house_look"] = house_look(s)
-        out["planner_on"] = get_setting(s, "planner_on", True)
         out["plan_review"] = get_setting(s, "plan_review", "flagged")
         for k, d in (("use_openrouter", False), ("use_shopify", True), ("use_drive", True), ("use_websites", True)):
             out[k] = get_setting(s, k, d)

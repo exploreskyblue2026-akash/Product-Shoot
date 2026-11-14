@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "5.1.0 (Shopify: auto-push replaces old photos instead of appending; AI-written SEO title and professional description when none is given)"
+APP_VERSION = "5.2.0 (Admin trimmed to what's actually used: removed the dead rulebook/cut-out/scene-pool engines and their settings and tabs)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
