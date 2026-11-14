@@ -36,6 +36,7 @@ DEFAULT_SETTINGS = {
     "fresh_brands": "",            # v2: brands that always get fresh scenes (comma separated)
     "autopilot": False,
     "auto_approve": True,          # approve when every QC check passes
+    "shopify_replace_images": True,  # automatic push: remove the product's old photos, keep only the new generated set
     "retries": 0,                  # automatic regenerations after a QC fail (each one costs a full image)
     "cost_mode": "economy",        # economy | standard | premium  (model + resolution per shot)
     "default_shots": [1, 2, 3, 4],          # shots generated automatically; others on demand from the studio

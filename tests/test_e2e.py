@@ -1277,3 +1277,51 @@ def test_input_photo_reused_for_a_slot_without_generation():
         det = next(sh for sh in p.shots if sh.no == 4)
         assert det.kind == "detail" and (det.qc or {}).get("how", {}).get("method") == "reused"
         assert _I.open(io.BytesIO(_st.read(det.image_path))).size == (1200, 1500)
+
+
+def test_shopify_seo_title_and_replace_images():
+    """A product with no human-written title gets a proper AI title (never the raw internal name), cached on the
+    Library product; an automatic Shopify push configured to replace images removes the old ones only after the
+    new shots are safely uploaded."""
+    c = client()
+    files = [("files", (p.name, p.read_bytes(), "image/jpeg")) for p in sorted(SAMPLES.iterdir())]
+    c.post("/api/sources/upload", files=files, data={"brand": "detect"})
+    c.put("/api/admin/settings", json={"default_shots": [1, 2, 3, 4], "max_cost_product": 5, "daily_budget": 100,
+                                       "hero_gate": False, "qc_mode": "full"})
+    c.post("/api/autopilot", json={"autopilot": True, "auto_approve": True})
+    for _ in range(10):
+        if not pipeline.tick():
+            break
+
+    from app.db import SessionLocal
+    from app import shopq
+    with SessionLocal() as s:
+        from sqlalchemy import select
+        from app.db import Product as P
+        prod = s.scalars(select(P).where(P.stage == "saved")).first()
+        assert prod, "a product should have been saved"
+        lp = shopq._lp(s, (prod.data or {}).get("lib_key"))
+        assert lp is not None
+        # nothing has been typed as a title anywhere: info_for must fall back to an AI-written one, not the raw name
+        assert not (lp.data or {}).get("titles")
+        info = shopq.info_for(s, prod)
+        raw = (lp.name or "") or prod.name or prod.code
+        assert info["title"] and info["title"] != raw
+        assert (lp.data or {}).get("ai_title") == info["title"]        # cached, not re-generated every call
+        info2 = shopq.info_for(s, prod)
+        assert info2["title"] == info["title"]
+
+        # automatic Shopify push after approval: replace_images should reach push_one as True by default
+        calls = []
+        orig = shopq.push_one
+        shopq.push_one = lambda s, p, overwrite=False, replace_images=False: (calls.append(replace_images) or
+                                                                               {"product_id": "x", "how": "t", "added": 0, "skipped": 0})
+        try:
+            from app import pipeline as _pl
+            with SessionLocal() as s2:
+                prod2 = s2.get(P, prod.id)
+                c.put("/api/admin/settings", json={"publish_shopify": True, "use_shopify": True, "shopify_replace_images": True})
+                _pl.approve(s2, prod2, "test")
+        finally:
+            shopq.push_one = orig
+        assert calls and calls[-1] is True

@@ -46,6 +46,10 @@ class MockProvider:
     def describe_product(self, ctx):
         return f"<p>{ctx.get('title')}</p><ul><li>By {ctx.get('brand')}</li></ul>"
 
+    def seo_title(self, ctx):
+        brand, typ = ctx.get("brand") or "", ctx.get("type") or ""
+        return f"{brand} {typ}".strip() or ctx.get("raw_name") or "Product"
+
     def describe_style(self, images):
         return "Soft daylight, colour-block paper backdrops, top-down and 30 degree angles, plain pencils and a small plant."
 

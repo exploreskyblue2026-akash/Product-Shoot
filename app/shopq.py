@@ -95,14 +95,36 @@ def _sheet_row(listing: dict, codes: set) -> dict | None:
 
 
 # ---------------------------------------------------------------- what we would write
-def info_for(s: Session, p: Product) -> dict:
+def seo_title_for(s: Session, p: Product, lp, prov=None) -> str:
+    """A proper Shopify title, written once from the product memory (cached) when nobody gave us one — never the raw
+    master-sheet/library name (often an internal code string) as-is."""
+    raw = (lp.name if lp else "") or p.name or p.code
+    if lp is None:
+        return raw
+    if (lp.data or {}).get("ai_title"):
+        return lp.data["ai_title"]
+    if prov is None:
+        from .providers import get_provider
+        prov = get_provider()
+    d = p.data or {}
+    brand = d.get("brand_label") or lp.brand or ""
+    mem = ((lp.data or {}).get("memory") or {}).get("facts") or {}
+    title = prov.seo_title({"raw_name": raw, "brand": brand, "type": lp.category or "", "facts": mem})
+    lp.data = {**(lp.data or {}), "ai_title": title}
+    s.commit()
+    return title
+
+
+def info_for(s: Session, p: Product, prov=None) -> dict:
     d = p.data or {}
     lp = _lp(s, d.get("lib_key"))
     ld = (lp.data or {}) if lp else {}
     titles = ld.get("titles") or {}
     row = _sheet_row(_listing(s), _codes(lp, p)) or {}
-    title = (row.get("title") or titles.get("seo optimised title") or titles.get("seo optimized title")
-             or (lp.name if lp else "") or p.name or p.code)
+    title = row.get("title") or titles.get("seo optimised title") or titles.get("seo optimized title")
+    if not title:
+        title = seo_title_for(s, p, lp, prov)
+    title = str(title).strip()
     skus = list(dict.fromkeys([x for x in (ld.get("skus") or []) + [lp.product_id if lp else "", p.code] if x]))
     brand = d.get("brand_label") or (lp.brand if lp else p.brand_id) or ""
     tags = list(dict.fromkeys([t for t in [brand.lower()] + _split(row.get("tags")) if t]))
@@ -117,7 +139,7 @@ def info_for(s: Session, p: Product) -> dict:
 
 def description_for(s: Session, p: Product, prov=None) -> str:
     """Sheet description if given, else an AI description written once from the product memory (cached)."""
-    info = info_for(s, p)
+    info = info_for(s, p, prov)
     if info["description_sheet"]:
         return info["description_sheet"]
     lp = _lp(s, (p.data or {}).get("lib_key"))
@@ -151,7 +173,7 @@ def _empty(v) -> bool:
 def plan(s: Session, p: Product, overwrite: bool = False, prov=None) -> dict:
     """Field-by-field plan against the live store product. Nothing is written."""
     from .connectors import shopify
-    info = info_for(s, p)
+    info = info_for(s, p, prov)
     found, how = shopify.find_product(info["barcode"], info["skus"])
     cur = shopify.get_product(found["id"]) if found else {}
     variant = {}

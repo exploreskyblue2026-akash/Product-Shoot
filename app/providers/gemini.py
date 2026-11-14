@@ -1,6 +1,7 @@
 """Google Gemini: vision analysis, image generation (Nano Banana family) and QC review."""
 import io
 import json
+import re
 from PIL import Image
 from google import genai
 from google.genai import types
@@ -206,14 +207,36 @@ class GeminiProvider:
         """Shopify description from the product memory only: no invented claims."""
         import json as _j
         r = self._call(MODEL_VISION, "vision", contents=[
-            "Write a Shopify product description in simple HTML (<p> and one <ul> of 3-5 <li>), 70-130 words, for: "
+            "Write a Shopify product description, in simple HTML (<p> and one <ul> of 3-5 <li>), 70-130 words, for: "
             f"{ctx.get('title')} (brand {ctx.get('brand')}, type {ctx.get('type')}). Use ONLY these verified facts, never "
-            f"invent sizes, materials, counts or claims that are not listed: {_j.dumps(ctx.get('facts') or {}, ensure_ascii=False)[:3000]}. "
-            "Friendly, clear Indian-English retail tone. No price, no shipping, no emojis. Return only the HTML."])
+            f"invent sizes, materials, counts or claims that are not listed: {_j.dumps(ctx.get('facts') or {}, ensure_ascii=False)[:3000]}.\n\n"
+            "Write like an in-house retail copywriter for an established store, not a dropshipper or an ad. Concretely: "
+            "lead with what the product is and its single most useful fact, in plain declarative sentences; weave in the "
+            "brand name, product type and one or two real material/use words naturally for search, without repeating any "
+            "of them more than twice or listing them like tags; never use hype words (amazing, premium, must-have, best, "
+            "perfect, revolutionize, elevate, game-changer), rhetorical questions, exclamation marks, emojis, or a 'feature: "
+            "benefit' bullet formula; do not address the reader as 'you' more than once. The bullets state real facts "
+            "(material, size, what's included, care), not sales lines. No price, no shipping, no made-up claims. "
+            "Return only the HTML."])
         h = (r.text or "").strip()
         if h.startswith("```"):
             h = h.strip("`").split("\n", 1)[-1].rsplit("```", 1)[0]
         return h.strip()[:4000]
+
+    def seo_title(self, ctx: dict) -> str:
+        """A clean, professional Shopify product title when no human-written title is available."""
+        import json as _j
+        r = self._call(MODEL_VISION, "vision", contents=[
+            "Write one Shopify product title, for: "
+            f"{ctx.get('raw_name')} (brand {ctx.get('brand')}, type {ctx.get('type')}). Verified facts, use only what's "
+            f"relevant, never invent: {_j.dumps(ctx.get('facts') or {}, ensure_ascii=False)[:2000]}.\n\n"
+            "Pattern: Brand + specific product name/type + the one most useful distinguishing attribute (size, colour, "
+            "pack count or material) if it's known. Title Case, 40-70 characters, no ALL CAPS, no internal SKU or item "
+            "codes, no quotation marks, no emoji, no punctuation at the end, no keyword stuffing or repeated words, and "
+            "no filler words (amazing, best, premium, new, perfect). It should read exactly like a title a real brand's "
+            "own merchandiser would type into their store. Return only the title text, nothing else."])
+        t = (r.text or "").strip().strip('"').strip()
+        return re.sub(r"\s+", " ", t)[:250]
 
     def describe_style(self, images: list[bytes]) -> str:
         """Golden shots -> a short written style brief (light, backdrop, colours, composition, prop TYPES)."""

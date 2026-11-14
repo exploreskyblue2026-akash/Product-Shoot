@@ -380,7 +380,7 @@ def approve(s: Session, p: Product, who: str):
     if get_setting(s, "publish_shopify", False) and get_setting(s, "use_shopify", True):   # optional: push straight away instead of via the Shopify queue
         try:
             from . import shopq
-            shopq.push_one(s, p)
+            shopq.push_one(s, p, replace_images=get_setting(s, "shopify_replace_images", True))
         except Exception as e:
             errors.append(f"Shopify push failed: {e}")
     p.error = " · ".join(errors)[:900]
