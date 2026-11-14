@@ -163,7 +163,7 @@ async function load(){D=await api(`/api/brands/${encodeURIComponent(KEY)}?q=${en
   $("#gold").innerHTML=D.golden.map((g,i)=>`<figure><img src="${esc(g)}" alt="Golden shot ${i+1}"><button type="button" data-del="${i}" aria-label="Remove">✕</button></figure>`).join("")+`<label class="btn sm">+ Add<input type="file" accept="image/*" multiple hidden id="gold-up"></label>`;
   renderShots();renderLists()}
 
-const SH=[["hero","1 · Hero"],["detail","2 · Detail"],["use_case","3 · Use case"],["lifestyle","4 · Lifestyle"]];
+const SH=[["hero","1 · Hero"],["lifestyle","2 · Lifestyle"],["use_case","3 · Use case"],["detail","4 · Detail"]];
 const METHOD={hero:[["same","Same angle as the main real photo (recommended)"],["flat","Top-down flat lay"]],detail:[["same","Close-up from the hero angle (recommended)"],["flat","Top-down close-up"]],use_case:[["same","Same face and angle as the hero (recommended)"],["flat","Top-down flat lay"],["photo","From a real 45° / side photo (only if one exists)"]],lifestyle:[["same","Same face and angle as the hero (recommended)"],["flat","Top-down flat lay"],["photo","From a real 45° / side photo (only if one exists)"]]};
 const SF=[["scene","Scene / setting","e.g. pastel desk with laptop and notebook"],["background","Background / surface","e.g. light grey seamless · solid orange paper"],["props","Props","plain, unbranded real objects only, e.g. blank notebook, plain pencils, small plant"],["pose","Hands / people / pose","e.g. a hand writing in a notebook (leave empty for none)"],["extra","Extra instructions","anything else for this shot"]];
 function renderShots(){const S=D.profile.shots||{};$("#shots").innerHTML=SH.map(([k,l])=>{const c=S[k]||{};return `<div class="card" data-shot="${k}"><h3>${l}</h3>

@@ -194,9 +194,6 @@ HOUSE LOOK (fixed for every image):
 STUDIO RULES (always):
 {static}
 
-SHOT RULES:
-{shot_rules}
-
 BRAND:
 {brand}
 
@@ -214,22 +211,7 @@ def house_look(s: Session) -> str:
 
 def static_rules(s: Session) -> str:
     own = (get_setting(s, "static_rules", "") or "").strip()     # edited in Admin -> Autopilot rules
-    if own:
-        return own
-    from .dataset import live_rules
-    rv = live_rules(s)
-    return ((rv.data or {}).get("static_rules") if rv else None) or DEFAULT_STATIC
-
-
-def _shot_rules(s: Session) -> str:
-    from .dataset import live_rules
-    rv = live_rules(s)
-    out = []
-    for sh in ((rv.data or {}).get("shot_directions") or {}).get("shots", []) if rv else []:
-        sub = sh.get("macro") or {}
-        out.append(f"- {sh['id']}: {sh.get('purpose', '')}. Camera: {sh.get('camera') or sub.get('camera', '')}. "
-                   f"Framing: {sh.get('framing') or sub.get('framing', '')}. Props: {sh.get('props') or sub.get('props', '')}.")
-    return "\n".join(out)
+    return own or DEFAULT_STATIC
 
 
 def _brand(s: Session, lp: LibProduct) -> tuple[str, dict]:
@@ -277,7 +259,7 @@ def make_plan(s: Session, key: str, prov, charge=None) -> dict:
              "skyblue_store": {"title": (ld.get("store") or {}).get("title", ""), "description": ld.get("store_description", "")}}
     busy = any(w in (lp.name or "").lower() for w in ("set", " x", "pack", "assorted", "colours", "colors"))
     prompt = INSTRUCTIONS.format(slots="\n".join(f"- {v}" for v in SLOT_STATIC.values()), hero_props="0-1 small props, the set itself is busy" if busy else "1-3 small props at the edges",
-                                 look=house_look(s), static=static_rules(s), shot_rules=_shot_rules(s), brand=brand_txt,
+                                 look=house_look(s), static=static_rules(s), brand=brand_txt,
                                  facts=json.dumps(facts, ensure_ascii=False), schema=json.dumps(SCHEMA, ensure_ascii=False))
     model = (get_setting(s, "model_planner", "") or "").strip()
     plan, used = prov.plan_product([storage.read(i.path) for i in imgs], prompt, model)
@@ -491,10 +473,20 @@ def render(plan: dict, kind: str, static: str, anchored: bool, approved_facts: s
         f"NOTE: {sh['notes']}" if sh.get("notes") else "",
         "STUDIO RULES: " + " ".join(x.strip() for x in static.splitlines() if x.strip()),
         "WATCH OUT: " + _j(plan.get("risks")) + "." if plan.get("risks") else "",
+        "UNBRANDED PRODUCT: this product carries no brand. Do not add any brand name, logo, label or lettering that is "
+        "not clearly visible in the reference photos; never show 'Made in China' or supplier marks."
+        if plan.get("_unbranded") else "",
         "NEVER: redesign or redraw the product, change the logo or any printed word, add text or logos, add other branded "
         "products, let anything float, show studio lights, show a side the photos do not show.",
     ]
     return "\n".join(x for x in lines if x)
+
+
+def for_product(plan: dict, lp) -> dict:
+    """The plan as used for rendering, with what is known about the product outside the analysis (is it unbranded?)."""
+    from .dataset import UNBRANDED
+    label = str(getattr(lp, "brand", "") or "").strip().lower()
+    return {**plan, "_unbranded": True} if label in UNBRANDED and not (plan.get("_brand") or {}).get("brand_name") else plan
 
 
 def qc_facts(plan: dict) -> str:

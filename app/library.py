@@ -884,6 +884,42 @@ def assign(s: Session, image_id: int, code: str) -> str:
     return p.key
 
 
+def adopt_product(s: Session, p, photos: list[tuple[str, bytes]] | None = None) -> str:
+    """One path for every product. A studio product that did not come from the Library queue (an uploaded file, a
+    Drive folder, a sheet row, a link) is filed in the Library under its code, so it gets the same clustering,
+    analysis and checklist gate as everything else. Returns its Library key.
+
+    The code is matched exactly (product id, item code or EAN); a code the Library does not know gets its own entry,
+    so a product outside the master sheet is never stuck. `photos` = every file found for this code (all angles)."""
+    d = p.data or {}
+    key = d.get("lib_key") or ""
+    lp = s.scalar(select(LibProduct).where(LibProduct.key == key)) if key else None
+    if lp is None:
+        k = norm(p.code)
+        lp = _index(s).get(k)
+        if lp is None:
+            from .dataset import library as _rows
+            brand = ((_rows(s, "brands").get(p.brand_id) or {}).get("brand_name") or "") if p.brand_id else ""
+            lp = LibProduct(key=k[:80], product_id=p.code[:80], name=(p.name or p.code)[:300],
+                            brand=(brand or (p.brand_id if p.brand_id not in ("", "_default") else ""))[:80],
+                            category=str(d.get("category") or "")[:80], data={"created_from": "studio input"})
+            s.add(lp)
+            s.flush()
+    key = lp.key
+    idx = {key: lp}
+    for name, data in photos or []:
+        add_image(s, data, name, "file", key=key, idx=idx, how="filed with its product code")
+    has_photo = s.scalar(select(LibImage.id).where(LibImage.key == key, LibImage.dup_of.is_(None))) is not None
+    if not has_photo and p.raw_path:
+        try:
+            add_image(s, storage.read(p.raw_path), f"{p.code}.jpg", "file", key=key, idx=idx, how="filed with its product code")
+        except Exception as e:
+            print(f"[library] could not file the photo of {p.code}: {e}")
+    p.data = {**(p.data or {}), "lib_key": key, "v2": True}
+    s.commit()
+    return key
+
+
 def clear(s: Session):
     s.execute(delete(LibImage))
     s.commit()

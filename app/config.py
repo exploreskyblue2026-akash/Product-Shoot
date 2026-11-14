@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.10.0 (classic/non-Library path now uses form-based camera angle too, drops hardcoded 'same as reference photo' text)"
+APP_VERSION = "5.0.0-a (one path: every product through the Library, one analysis and the checklist gate; old engines unreachable; slot labels fixed)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
