@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "5.4.1 (fixed input_references format for OpenRouter Images API - must be objects, not bare URL strings; this was the real cause of the gpt-image-1 404/validation error)"
+APP_VERSION = "5.4.2 (fixed gpt-image-1/gpt-image-1-mini No-provider error: these models only support aspect_ratio 1:1/3:2/2:3/auto and have no resolution parameter - now using 2:3 and quality instead of the 4:5+resolution combo that no provider on OpenRouter accepted)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

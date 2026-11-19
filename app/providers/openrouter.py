@@ -34,6 +34,15 @@ def _url(b: bytes) -> str:
 
 
 RESOLUTIONS = {"1K": "1K", "2K": "2K", "4K": "4K"}
+# Not every provider on OpenRouter's Images API accepts the same aspect_ratio/resolution values; sending one
+# the model doesn't support gets "No provider for ..." (a routing failure, not a validation error - OpenRouter
+# checked it against the model's real capabilities and found no match). gpt-image-1/-mini only take
+# aspect_ratio in {1:1, 3:2, 2:3, auto} and have no resolution/size parameter at all - "2:3" is the closest
+# portrait ratio they support to our default 4:5, and quality stands in for size on these.
+QUIRKS = {
+    "openai/gpt-image-1": {"aspect_ratio": "2:3", "resolution": False, "quality": {"1K": "low", "2K": "medium", "4K": "high"}},
+    "openai/gpt-image-1-mini": {"aspect_ratio": "2:3", "resolution": False, "quality": {"1K": "low", "2K": "medium", "4K": "high"}},
+}
 
 
 def generate(model: str, prompt: str, images: list[bytes], size: str = "1K") -> tuple[bytes, float | None]:
@@ -44,8 +53,12 @@ def generate(model: str, prompt: str, images: list[bytes], size: str = "1K") -> 
     Returns (image_bytes, real_usd_cost). The real cost comes straight from OpenRouter's own usage figure for
     this exact request — accurate, unlike any hand-maintained per-model price table — and is None only if a
     provider didn't report one, in which case the caller falls back to its own estimate."""
-    body = {"model": model, "prompt": prompt, "aspect_ratio": "4:5", "response_format": "b64_json",
-            "resolution": RESOLUTIONS.get(size, "1K")}
+    quirk = QUIRKS.get(model, {})
+    body = {"model": model, "prompt": prompt, "aspect_ratio": quirk.get("aspect_ratio", "4:5"), "response_format": "b64_json"}
+    if quirk.get("resolution", True):
+        body["resolution"] = RESOLUTIONS.get(size, "1K")
+    if "quality" in quirk:
+        body["quality"] = quirk["quality"].get(size, "medium")
     if images:
         body["input_references"] = [{"type": "image_url", "image_url": {"url": _url(b)}} for b in images]
     r = httpx.post(IMAGES_URL, json=body, timeout=300, headers={"Authorization": f"Bearer {_key()}",
