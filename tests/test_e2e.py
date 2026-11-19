@@ -1003,6 +1003,57 @@ def test_openrouter_switched_off_means_gemini_only():
         c.put("/api/admin/settings", json={"model_hero": "", "use_shopify": True})
 
 
+def test_analysis_model_gated_by_openrouter_switch():
+    """model_planner (analysis + shot-prompt drafting, and the SEO title/description it feeds) only reaches
+    OpenRouter when the switch is on; off, an 'openrouter:...' box is treated as unset (best Gemini), the same
+    rule already applied to the per-shot image model boxes."""
+    from app.db import SessionLocal, set_setting
+    from app.dataset import or_gate
+    with SessionLocal() as s:
+        set_setting(s, "use_openrouter", False); s.commit()
+        assert or_gate(s, "openrouter:openai/gpt-5") == ""
+        assert or_gate(s, "gemini-3-pro") == "gemini-3-pro"
+        assert or_gate(s, "") == ""
+        set_setting(s, "use_openrouter", True); s.commit()
+        assert or_gate(s, "openrouter:openai/gpt-5") == "openrouter:openai/gpt-5"
+    c = client()
+    from app.providers import mock
+    seen = []
+    og = mock.MockProvider.seo_title
+    def spy(self, ctx):
+        seen.append(ctx.get("model")); return og(self, ctx)
+    mock.MockProvider.seo_title = spy
+    try:
+        c.put("/api/admin/settings", json={"model_planner": "openrouter:openai/gpt-5", "use_openrouter": False})
+        c.post("/api/sources/upload", files=[("files", ("GATE-1_front.jpg", (SAMPLES / "WAT-HEM-SSGT_front.png").read_bytes(), "image/jpeg"))],
+               data={"brand": "detect"})
+        c.put("/api/admin/settings", json={"default_shots": [1], "max_cost_product": 5, "daily_budget": 100, "hero_gate": False})
+        c.post("/api/autopilot", json={"autopilot": True, "auto_approve": True})
+        for _ in range(10):
+            if not pipeline.tick():
+                break
+        from app.db import SessionLocal as SL, Product as P
+        from sqlalchemy import select
+        from app import shopq
+        with SL() as s:
+            prod = next((x for x in s.scalars(select(P)) if x.code == "GATE-1"), None)
+            assert prod is not None
+            shopq.seo_title_for(s, prod, shopq._lp(s, (prod.data or {}).get("lib_key")))
+        assert seen and seen[-1] == ""                              # switched off: gated to blank, not openrouter
+        c.put("/api/admin/settings", json={"use_openrouter": True})
+        with SL() as s:
+            prod = next((x for x in s.scalars(select(P)) if x.code == "GATE-1"), None)
+            lp = shopq._lp(s, (prod.data or {}).get("lib_key"))
+            lp.data = {**(lp.data or {}), "ai_title": None}         # force a fresh write, bypassing the cache
+            del lp.data["ai_title"]
+            s.commit()
+            shopq.seo_title_for(s, prod, lp)
+        assert seen[-1] == "openrouter:openai/gpt-5"                # switched on: reaches the provider as-is
+    finally:
+        mock.MockProvider.seo_title = og
+        c.put("/api/admin/settings", json={"model_planner": "", "use_openrouter": False})
+
+
 def test_library_queue_codes_any_brand_website_first_then_studio():
     import io
     from PIL import Image, ImageDraw

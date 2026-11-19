@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .connectors import storage
+from .dataset import or_gate
 from .db import LibProduct, Product, get_setting, log, set_setting
 
 SHOT_LABEL = {"hero": "Hero", "detail": "Detail", "use_case": "In use", "lifestyle": "Lifestyle"}
@@ -109,7 +110,8 @@ def seo_title_for(s: Session, p: Product, lp, prov=None) -> str:
     d = p.data or {}
     brand = d.get("brand_label") or lp.brand or ""
     mem = ((lp.data or {}).get("memory") or {}).get("facts") or {}
-    title = prov.seo_title({"raw_name": raw, "brand": brand, "type": lp.category or "", "facts": mem})
+    model = or_gate(s, get_setting(s, "model_planner", ""))
+    title = prov.seo_title({"raw_name": raw, "brand": brand, "type": lp.category or "", "facts": mem, "model": model})
     lp.data = {**(lp.data or {}), "ai_title": title}
     s.commit()
     return title
@@ -149,8 +151,9 @@ def description_for(s: Session, p: Product, prov=None) -> str:
         from .providers import get_provider
         prov = get_provider()
     mem = ((lp.data or {}).get("memory") or {}).get("facts") if lp else {}
+    model = or_gate(s, get_setting(s, "model_planner", ""))
     html = prov.describe_product({"title": info["title"], "brand": info["vendor"], "type": info["type"],
-                                  "facts": mem or {}, "name": p.name})
+                                  "facts": mem or {}, "name": p.name, "model": model})
     if lp is not None:
         lp.data = {**(lp.data or {}), "ai_description": html}
         s.commit()

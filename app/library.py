@@ -14,6 +14,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.orm import Session
 
 from .connectors import storage
+from .dataset import or_gate
 from .db import LibImage, LibProduct, get_setting, set_setting, log
 
 IMG_EXT = (".jpg", ".jpeg", ".png", ".webp")
@@ -781,8 +782,9 @@ def study_product(s: Session, key: str, prov) -> dict:
     if not refs:
         raise ValueError("No photos for this product")
     imgs = [storage.read(r["path"]) for r in refs]
+    model = or_gate(s, get_setting(s, "model_planner", ""))
     facts = prov.study(imgs, {"name": p.name, "brand": p.brand, "category": p.category, "code": p.product_id,
-                              "schema": MEMORY_SCHEMA})
+                              "schema": MEMORY_SCHEMA, "model": model})
     angles = facts.pop("angles", []) or []
     for r, a in zip(refs, angles):
         img = s.get(LibImage, r["id"])

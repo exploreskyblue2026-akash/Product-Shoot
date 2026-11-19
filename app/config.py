@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "5.2.0 (Admin trimmed to what's actually used: removed the dead rulebook/cut-out/scene-pool engines and their settings and tabs)"
+APP_VERSION = "5.3.0 (OpenRouter now covers the analysis/SEO side too: the Analysis model box can run product analysis, shot-prompt drafting, titles and descriptions through OpenRouter, not just image generation)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

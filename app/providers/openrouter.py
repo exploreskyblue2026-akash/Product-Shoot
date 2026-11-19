@@ -1,6 +1,12 @@
-"""OpenRouter: one key for many image models (e.g. FLUX.2). Used when a model name starts with 'openrouter:'.
+"""OpenRouter: one key for many models (image AND text/vision), used whenever a model name starts with
+'openrouter:' — in any shot's model box for image generation, or in the Analysis / SEO model boxes for the
+text+vision side (product analysis, shot-prompt drafting, titles, descriptions), so the whole pipeline can run
+on OpenRouter instead of Gemini for a side-by-side comparison.
 
-Model examples: openrouter:black-forest-labs/flux.2-pro:free · openrouter:black-forest-labs/flux.2-pro
+Model examples:
+  image:        openrouter:black-forest-labs/flux.2-pro:free · openrouter:black-forest-labs/flux.2-pro ·
+                openrouter:openai/gpt-image-1
+  text/vision:  openrouter:openai/gpt-5 · openrouter:anthropic/claude-sonnet-4.5 · openrouter:google/gemini-3-pro
 """
 import base64
 
@@ -45,6 +51,32 @@ def generate(model: str, prompt: str, images: list[bytes]) -> bytes:
             if u.startswith("http"):
                 return httpx.get(u, timeout=120).content
     raise RuntimeError(f"OpenRouter {model} returned no image")
+
+
+def complete(model: str, prompt: str, images: list[bytes] | None = None, json_mode: bool = False,
+             temperature: float = 0.2) -> str:
+    """Text (optionally JSON) response from a text/vision model, with 0-N images as vision input. Used for
+    product analysis, shot-prompt drafting, SEO titles and descriptions when that box is set to 'openrouter:...'."""
+    content = [{"type": "text", "text": prompt}] + [{"type": "image_url", "image_url": {"url": _url(b)}} for b in (images or [])]
+    body = {"model": model, "messages": [{"role": "user", "content": content}], "temperature": temperature}
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    r = httpx.post(URL, json=body, timeout=300, headers={"Authorization": f"Bearer {_key()}",
+                                                          "HTTP-Referer": "https://skyblue.in", "X-Title": "Skyblue Product Studio"})
+    if r.status_code >= 400:
+        raise RuntimeError(f"OpenRouter {model} failed ({r.status_code}): {r.text[:300]}")
+    j = r.json()
+    if j.get("error"):
+        raise RuntimeError(f"OpenRouter {model}: {str(j['error'])[:300]}")
+    choices = j.get("choices") or []
+    if not choices:
+        raise RuntimeError(f"OpenRouter {model} returned no response")
+    text = (choices[0].get("message") or {}).get("content") or ""
+    if isinstance(text, list):                            # some models return content as a list of parts
+        text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
+    if not text:
+        raise RuntimeError(f"OpenRouter {model} returned an empty response")
+    return text
 
 
 def test() -> str:

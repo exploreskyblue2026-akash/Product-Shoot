@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .connectors import storage
+from .dataset import or_gate
 from .db import LibImage, LibProduct, Setting, get_setting, log
 
 SHOTS = ("hero", "lifestyle", "use_case", "detail")            # listing order (approved 12 Nov 2026)
@@ -261,7 +262,7 @@ def make_plan(s: Session, key: str, prov, charge=None) -> dict:
     prompt = INSTRUCTIONS.format(slots="\n".join(f"- {v}" for v in SLOT_STATIC.values()), hero_props="0-1 small props, the set itself is busy" if busy else "1-3 small props at the edges",
                                  look=house_look(s), static=static_rules(s), brand=brand_txt,
                                  facts=json.dumps(facts, ensure_ascii=False), schema=json.dumps(SCHEMA, ensure_ascii=False))
-    model = (get_setting(s, "model_planner", "") or "").strip()
+    model = or_gate(s, get_setting(s, "model_planner", ""))
     plan, used = prov.plan_product([storage.read(i.path) for i in imgs], prompt, model)
     _, bd = _brand(s, lp)
     plan["_brand"] = {k: bd.get(k) for k in ("brand_name", "palette_hex", "hero_backdrop", "mood_override") if bd.get(k)}

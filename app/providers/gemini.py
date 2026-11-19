@@ -189,6 +189,10 @@ class GeminiProvider:
 
     def plan_product(self, images: list[bytes], prompt: str, model: str = "") -> tuple[dict, str]:
         """Analysis + 4 shot plans in ONE call with the best available Pro model (never a cheaper one)."""
+        if str(model).startswith("openrouter:"):
+            from . import openrouter
+            text = openrouter.complete(model.split(":", 1)[1], prompt + "\nReply with JSON only.", images, json_mode=True)
+            return _json(text), model
         m = model or _pick(self._available(), "planner")
         if not m:
             raise RuntimeError("No Gemini Pro text model is available on this API key; set one in Admin → Planner model.")
@@ -206,7 +210,7 @@ class GeminiProvider:
     def describe_product(self, ctx: dict) -> str:
         """Shopify description from the product memory only: no invented claims."""
         import json as _j
-        r = self._call(MODEL_VISION, "vision", contents=[
+        prompt = (
             "Write a Shopify product description, in simple HTML (<p> and one <ul> of 3-5 <li>), 70-130 words, for: "
             f"{ctx.get('title')} (brand {ctx.get('brand')}, type {ctx.get('type')}). Use ONLY these verified facts, never "
             f"invent sizes, materials, counts or claims that are not listed: {_j.dumps(ctx.get('facts') or {}, ensure_ascii=False)[:3000]}.\n\n"
@@ -217,8 +221,14 @@ class GeminiProvider:
             "perfect, revolutionize, elevate, game-changer), rhetorical questions, exclamation marks, emojis, or a 'feature: "
             "benefit' bullet formula; do not address the reader as 'you' more than once. The bullets state real facts "
             "(material, size, what's included, care), not sales lines. No price, no shipping, no made-up claims. "
-            "Return only the HTML."])
-        h = (r.text or "").strip()
+            "Return only the HTML.")
+        model = str(ctx.get("model") or "")
+        if model.startswith("openrouter:"):
+            from . import openrouter
+            h = openrouter.complete(model.split(":", 1)[1], prompt)
+        else:
+            h = self._call(MODEL_VISION, "vision", contents=[prompt]).text or ""
+        h = h.strip()
         if h.startswith("```"):
             h = h.strip("`").split("\n", 1)[-1].rsplit("```", 1)[0]
         return h.strip()[:4000]
@@ -226,7 +236,7 @@ class GeminiProvider:
     def seo_title(self, ctx: dict) -> str:
         """A clean, professional Shopify product title when no human-written title is available."""
         import json as _j
-        r = self._call(MODEL_VISION, "vision", contents=[
+        prompt = (
             "Write one Shopify product title, for: "
             f"{ctx.get('raw_name')} (brand {ctx.get('brand')}, type {ctx.get('type')}). Verified facts, use only what's "
             f"relevant, never invent: {_j.dumps(ctx.get('facts') or {}, ensure_ascii=False)[:2000]}.\n\n"
@@ -234,8 +244,14 @@ class GeminiProvider:
             "pack count or material) if it's known. Title Case, 40-70 characters, no ALL CAPS, no internal SKU or item "
             "codes, no quotation marks, no emoji, no punctuation at the end, no keyword stuffing or repeated words, and "
             "no filler words (amazing, best, premium, new, perfect). It should read exactly like a title a real brand's "
-            "own merchandiser would type into their store. Return only the title text, nothing else."])
-        t = (r.text or "").strip().strip('"').strip()
+            "own merchandiser would type into their store. Return only the title text, nothing else.")
+        model = str(ctx.get("model") or "")
+        if model.startswith("openrouter:"):
+            from . import openrouter
+            t = openrouter.complete(model.split(":", 1)[1], prompt)
+        else:
+            t = self._call(MODEL_VISION, "vision", contents=[prompt]).text or ""
+        t = t.strip().strip('"').strip()
         return re.sub(r"\s+", " ", t)[:250]
 
     def describe_style(self, images: list[bytes]) -> str:
@@ -256,7 +272,13 @@ class GeminiProvider:
             f"code: {ctx.get('code')}). Describe it so an image generator can reproduce it EXACTLY. Transcribe printed "
             "text letter by letter; only include what you can actually see. Return ONLY JSON with these keys:\n"
             + json.dumps(ctx["schema"]))
-        parts = [types.Part.from_bytes(data=b, mime_type=_mime(b)) for b in images[:4]]
+        model = str(ctx.get("model") or "")
+        imgs = images[:4]
+        if model.startswith("openrouter:"):
+            from . import openrouter
+            text = openrouter.complete(model.split(":", 1)[1], prompt + "\nReply with JSON only.", imgs, json_mode=True, temperature=0)
+            return _json(text)
+        parts = [types.Part.from_bytes(data=b, mime_type=_mime(b)) for b in imgs]
         r = self._vision(parts + [prompt + "\nReply with JSON only."], temperature=0)
         return _json(r.text)
 

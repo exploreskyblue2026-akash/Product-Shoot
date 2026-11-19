@@ -10,6 +10,13 @@ from .db import RuleVersion, LibraryRow, Setting, User, get_setting, set_setting
 
 LIB_TABLES = {"brands": "brand_id", "categories": "category_id"}
 
+
+def or_gate(s: Session, raw: str) -> str:
+    """An 'openrouter:...' model string counts only when the OpenRouter switch in Admin is on; otherwise it's
+    treated as unset (falls back to the built-in Gemini default) so a stale box never silently calls OpenRouter."""
+    raw = (raw or "").strip()
+    return "" if raw.startswith("openrouter:") and not get_setting(s, "use_openrouter", False) else raw
+
 DEFAULT_STRENGTH = {"lighting": "strict", "attention": "normal", "size": "normal",
                     "props": "normal", "negative_space": "relaxed"}
 
