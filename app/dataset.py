@@ -157,6 +157,16 @@ def seed(s: Session, owner_email: str, owner_hash: str):
         except Exception as e:
             print(f"[seed] Troika reset skipped: {e}")
         set_setting(s, "reset_troika_v1", True)
+    if not get_setting(s, "preset_fix_stale_gpt5_v1", False) and os.environ.get("SKIP_PRESETS") != "1":
+        # "openai/gpt-5" was retired from OpenRouter (the lineup moved on to gpt-6.x) and 404s now. Any box
+        # still pointing at it is corrected once: the escalate/retry box is a safety net and should never be
+        # an OpenRouter model at all (clear it so a failed main model doesn't fail again on "retry"); the
+        # analysis box gets a current, confirmed-vision OpenRouter model instead of being left broken.
+        if (get_setting(s, "escalate_model", "") or "").startswith("openrouter:openai/gpt-5"):
+            set_setting(s, "escalate_model", "")
+        if (get_setting(s, "model_planner", "") or "").startswith("openrouter:openai/gpt-5"):
+            set_setting(s, "model_planner", "openrouter:anthropic/claude-sonnet-5.5")
+        set_setting(s, "preset_fix_stale_gpt5_v1", True)
     if not get_setting(s, "purge_prices_v1", False):        # commercial data (cost / price / stock) is never kept
         from .db import LibProduct
         for lp in s.scalars(select(LibProduct)):

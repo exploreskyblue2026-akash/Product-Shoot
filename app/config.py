@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "5.4.2 (fixed gpt-image-1/gpt-image-1-mini No-provider error: these models only support aspect_ratio 1:1/3:2/2:3/auto and have no resolution parameter - now using 2:3 and quality instead of the 4:5+resolution combo that no provider on OpenRouter accepted)"
+APP_VERSION = "5.4.3 (one-time fix: any Analysis/retry model box still pointing at the retired openai/gpt-5 is corrected automatically on this deploy - retry box cleared, Analysis box set to anthropic/claude-sonnet-5.5)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
