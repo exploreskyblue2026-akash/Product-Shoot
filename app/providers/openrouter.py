@@ -15,6 +15,7 @@ import httpx
 from ..secrets import get_secret
 
 URL = "https://openrouter.ai/api/v1/chat/completions"
+IMAGES_URL = "https://openrouter.ai/api/v1/images"
 
 
 def _key() -> str:
@@ -32,25 +33,39 @@ def _url(b: bytes) -> str:
     return f"data:{_mime(b)};base64,{base64.b64encode(b).decode()}"
 
 
-def generate(model: str, prompt: str, images: list[bytes]) -> bytes:
-    content = [{"type": "text", "text": prompt}] + [{"type": "image_url", "image_url": {"url": _url(b)}} for b in images]
-    body = {"model": model, "messages": [{"role": "user", "content": content}], "modalities": ["image", "text"],
-            "image_config": {"aspect_ratio": "4:5"}}
-    r = httpx.post(URL, json=body, timeout=300, headers={"Authorization": f"Bearer {_key()}",
-                                                          "HTTP-Referer": "https://skyblue.in", "X-Title": "Skyblue Product Studio"})
+RESOLUTIONS = {"1K": "1K", "2K": "2K", "4K": "4K"}
+
+
+def generate(model: str, prompt: str, images: list[bytes], size: str = "1K") -> tuple[bytes, float | None]:
+    """Uses OpenRouter's unified Images API (POST /api/v1/images), not /chat/completions: several models —
+    including OpenAI's gpt-image-1/gpt-image-1-mini — are only served through this dedicated endpoint and
+    404 on chat/completions even with modalities:[image]. This endpoint also covers FLUX and the rest, with
+    reference photos passed as input_references rather than chat image_url content.
+    Returns (image_bytes, real_usd_cost). The real cost comes straight from OpenRouter's own usage figure for
+    this exact request — accurate, unlike any hand-maintained per-model price table — and is None only if a
+    provider didn't report one, in which case the caller falls back to its own estimate."""
+    body = {"model": model, "prompt": prompt, "aspect_ratio": "4:5", "response_format": "b64_json",
+            "resolution": RESOLUTIONS.get(size, "1K")}
+    if images:
+        body["input_references"] = [_url(b) for b in images]
+    r = httpx.post(IMAGES_URL, json=body, timeout=300, headers={"Authorization": f"Bearer {_key()}",
+                                                                 "HTTP-Referer": "https://skyblue.in", "X-Title": "Skyblue Product Studio"})
     if r.status_code >= 400:
         raise RuntimeError(f"OpenRouter {model} failed ({r.status_code}): {r.text[:300]}")
     j = r.json()
     if j.get("error"):
         raise RuntimeError(f"OpenRouter {model}: {str(j['error'])[:300]}")
-    for ch in j.get("choices") or []:
-        for im in (ch.get("message") or {}).get("images") or []:
-            u = (im.get("image_url") or {}).get("url", "")
-            if u.startswith("data:"):
-                return base64.b64decode(u.split(",", 1)[1])
-            if u.startswith("http"):
-                return httpx.get(u, timeout=120).content
-    raise RuntimeError(f"OpenRouter {model} returned no image")
+    data = j.get("data") or []
+    if not data:
+        raise RuntimeError(f"OpenRouter {model} returned no image")
+    item = data[0]
+    cost = (j.get("usage") or {}).get("cost")
+    cost = float(cost) if isinstance(cost, (int, float)) else None
+    if item.get("b64_json"):
+        return base64.b64decode(item["b64_json"]), cost
+    if item.get("url"):
+        return httpx.get(item["url"], timeout=120).content, cost
+    raise RuntimeError(f"OpenRouter {model} returned no image data")
 
 
 def complete(model: str, prompt: str, images: list[bytes] | None = None, json_mode: bool = False,

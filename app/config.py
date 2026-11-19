@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "5.3.0 (OpenRouter now covers the analysis/SEO side too: the Analysis model box can run product analysis, shot-prompt drafting, titles and descriptions through OpenRouter, not just image generation)"
+APP_VERSION = "5.4.0 (fixed OpenRouter image generation: gpt-image-1 and similar now use OpenRouter's dedicated Images API instead of 404ing on the old chat-completions route; style refs no longer dropped on OpenRouter; real per-image $ cost from OpenRouter is used instead of a guess)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
@@ -55,9 +55,16 @@ def mode_model(kind: str) -> str:
 
 
 def image_cost(model: str, size: str = "1K") -> float:
+    """Pre-flight estimate only, used for the budget check before a call is made. The real per-call cost (what
+    actually gets charged to the product) comes from OpenRouter's own usage figure once the image is back —
+    see GeminiProvider.last_cost / pipeline.py — so this guess only needs to be in the right ballpark."""
     if str(model).startswith("openrouter:"):
         m = model.lower()
-        return 0.0 if m.endswith(":free") else 0.075 if "max" in m else 0.02 if "klein" in m else 0.05
+        if m.endswith(":free"):
+            return 0.0
+        if "gpt-image" in m:
+            return {"1K": 0.04, "2K": 0.07, "4K": 0.17}.get(size, 0.04)
+        return 0.075 if "max" in m else 0.02 if "klein" in m else 0.05
     m = model_name(model)
     base = COST_IMAGE_PRO if "pro" in m else COST_IMAGE_LITE if "lite" in m else COST_IMAGE_FAST
     return round(base * SIZE_FACTOR.get(size, 1.0), 4)

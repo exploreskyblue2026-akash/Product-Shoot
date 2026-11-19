@@ -121,6 +121,8 @@ class GeminiProvider:
         if not key:
             raise RuntimeError("Gemini API key missing. Add it in Admin → API & models or set GEMINI_API_KEY.")
         self.client = genai.Client(api_key=key)
+        self.last_model = None
+        self.last_cost = None          # real $ cost from OpenRouter's own usage figure, when it gave one
 
     def test(self) -> str:
         from .. import config
@@ -157,13 +159,16 @@ class GeminiProvider:
 
     def generate(self, prompt: str, raw: bytes, model: str, size: str = IMAGE_SIZE, refs: list | None = None,
                  style: bytes | None = None) -> bytes:
-        if str(model).startswith("openrouter:"):               # FLUX.2 etc. through OpenRouter
+        if str(model).startswith("openrouter:"):               # FLUX.2, gpt-image-1 etc. through OpenRouter
             from . import openrouter
-            imgs = [raw] + list(refs or [])[:3]
+            imgs = [raw] + list(refs or [])[:3] + ([style] if style else [])   # style ref is a real input, not dropped
             lead = ("The first image is the real product. " if len(imgs) == 1 else
                     f"The first {len(imgs)} images all show the SAME real product; reproduce it exactly. ")
             self.last_model = model
-            return openrouter.generate(model.split(":", 1)[1], lead + prompt, imgs)
+            img, cost = openrouter.generate(model.split(":", 1)[1], lead + prompt, imgs, size=size)
+            self.last_cost = cost
+            return img
+        self.last_cost = None
         parts = [types.Part.from_bytes(data=raw, mime_type=_mime(raw))]
         for extra in (refs or [])[:3]:
             parts.append(types.Part.from_bytes(data=extra, mime_type=_mime(extra)))

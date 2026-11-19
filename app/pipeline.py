@@ -242,8 +242,9 @@ def process(pid: int, only: list[int] | None = None):
                     model, escalated = escalate, True
                     img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=call_refs, style=None))
                 used = getattr(prov, "last_model", None) or model     # may differ after a fallback
+                real_cost = getattr(prov, "last_cost", None)          # OpenRouter's own reported cost, if it gave one
                 sh.model = used
-                _charge(s, p, "image", used, config.image_cost(used, size), sh)
+                _charge(s, p, "image", used, real_cost if real_cost is not None else config.image_cost(used, size), sh)
                 rel = storage.save(f"shots/{storage.safe(p.code)}/{no}-{sh.kind}-a{sh.attempts}.jpg", img)
                 try:
                     qref = _sheet([hero_ref, shot_raw] if hero_ref else [shot_raw] + refs[:2])
@@ -313,7 +314,8 @@ def _reuse_input(s: Session, p: Product, sh: Shot, rec: dict, prov, model: str, 
             print(f"[pipeline] light edit failed for {p.code} {sh.kind}: {e}")
             return False
         used = getattr(prov, "last_model", None) or edit_model
-        _charge(s, p, "image", used, config.image_cost(used, size), sh)
+        real_cost = getattr(prov, "last_cost", None)
+        _charge(s, p, "image", used, real_cost if real_cost is not None else config.image_cost(used, size), sh)
         how = {"method": "light_edit", "source": img.path, "edits": pick["edits"]}
         try:
             result = prov.qc(_sheet([data]), out, {"kind": sh.kind, "no": sh.no, "facts": planner.qc_facts(rec.get("json") or {}),
