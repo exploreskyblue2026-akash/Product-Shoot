@@ -47,7 +47,7 @@ def generate(model: str, prompt: str, images: list[bytes], size: str = "1K") -> 
     body = {"model": model, "prompt": prompt, "aspect_ratio": "4:5", "response_format": "b64_json",
             "resolution": RESOLUTIONS.get(size, "1K")}
     if images:
-        body["input_references"] = [_url(b) for b in images]
+        body["input_references"] = [{"type": "image_url", "image_url": {"url": _url(b)}} for b in images]
     r = httpx.post(IMAGES_URL, json=body, timeout=300, headers={"Authorization": f"Bearer {_key()}",
                                                                  "HTTP-Referer": "https://skyblue.in", "X-Title": "Skyblue Product Studio"})
     if r.status_code >= 400:

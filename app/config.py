@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "5.4.0 (fixed OpenRouter image generation: gpt-image-1 and similar now use OpenRouter's dedicated Images API instead of 404ing on the old chat-completions route; style refs no longer dropped on OpenRouter; real per-image $ cost from OpenRouter is used instead of a guess)"
+APP_VERSION = "5.4.1 (fixed input_references format for OpenRouter Images API - must be objects, not bare URL strings; this was the real cause of the gpt-image-1 404/validation error)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
