@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "5.4.3 (one-time fix: any Analysis/retry model box still pointing at the retired openai/gpt-5 is corrected automatically on this deploy - retry box cleared, Analysis box set to anthropic/claude-sonnet-5.5)"
+APP_VERSION = "5.4.4 (OpenRouter free-tier image models auto-retry on the paid variant when the free pool has no endpoint, instead of failing the shot)"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

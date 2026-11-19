@@ -1364,3 +1364,53 @@ def test_shopify_seo_title_and_replace_images():
         finally:
             shopq.push_one = orig
         assert calls and calls[-1] is True
+
+
+def test_openrouter_free_tier_falls_back_to_paid_on_no_endpoint():
+    """A ':free' image model can 404 "No endpoint found for model ..." when OpenRouter's free-tier capacity for
+    it has emptied out, even though the exact same model string worked moments earlier with no code change —
+    this is a provider-routing gap, not a bad model name. generate() must retry once on the paid (non-':free')
+    model and report back which one actually produced the image, so the caller's cost/model bookkeeping is
+    accurate. A genuinely bad/unknown model name (never worked) should NOT get this retry treatment — only this
+    specific "no endpoint" shape on a ':free' model does."""
+    import httpx
+    from app.providers import openrouter
+
+    calls = []
+
+    class FakeResp:
+        def __init__(self, status, payload=None, text=""):
+            self.status_code = status
+            self._payload = payload or {}
+            self.text = text
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, json=None, timeout=None, headers=None):
+        calls.append(json["model"])
+        if json["model"] == "black-forest-labs/flux.2-pro:free":
+            return FakeResp(404, text='{"error":{"message":"No endpoint found for model \\"%s\\"","code":404}}' % json["model"])
+        if json["model"] == "some/unknown-model":
+            return FakeResp(404, text='{"error":{"message":"No endpoint found for model \\"%s\\"","code":404}}' % json["model"])
+        return FakeResp(200, {"data": [{"b64_json": "AAAA"}], "usage": {"cost": 0.05}})
+
+    og_post, og_key = httpx.post, openrouter._key
+    httpx.post, openrouter._key = fake_post, lambda: "test-key"
+    try:
+        img, cost, used = openrouter.generate("black-forest-labs/flux.2-pro:free", "a product photo", [])
+        assert calls == ["black-forest-labs/flux.2-pro:free", "black-forest-labs/flux.2-pro"], calls
+        assert used == "black-forest-labs/flux.2-pro"      # paid variant actually served it
+        assert cost == 0.05                                # real billed cost from the fallback call, not free
+        assert img == b"\x00\x00\x00"
+
+        # a non-free model with the same error should NOT retry (nothing to fall back to) - it must raise
+        calls.clear()
+        try:
+            openrouter.generate("some/unknown-model", "a product photo", [])
+            assert False, "expected a RuntimeError"
+        except RuntimeError as e:
+            assert calls == ["some/unknown-model"]
+            assert "404" in str(e)
+    finally:
+        httpx.post, openrouter._key = og_post, og_key

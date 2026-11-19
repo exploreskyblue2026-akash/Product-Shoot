@@ -164,8 +164,8 @@ class GeminiProvider:
             imgs = [raw] + list(refs or [])[:3] + ([style] if style else [])   # style ref is a real input, not dropped
             lead = ("The first image is the real product. " if len(imgs) == 1 else
                     f"The first {len(imgs)} images all show the SAME real product; reproduce it exactly. ")
-            self.last_model = model
-            img, cost = openrouter.generate(model.split(":", 1)[1], lead + prompt, imgs, size=size)
+            img, cost, used = openrouter.generate(model.split(":", 1)[1], lead + prompt, imgs, size=size)
+            self.last_model = f"openrouter:{used}"   # may differ from `model` if the :free pool had no endpoint
             self.last_cost = cost
             return img
         self.last_cost = None

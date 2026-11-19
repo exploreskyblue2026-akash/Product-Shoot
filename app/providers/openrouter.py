@@ -7,6 +7,12 @@ Model examples:
   image:        openrouter:black-forest-labs/flux.2-pro:free · openrouter:black-forest-labs/flux.2-pro ·
                 openrouter:openai/gpt-image-1
   text/vision:  openrouter:openai/gpt-5 · openrouter:anthropic/claude-sonnet-4.5 · openrouter:google/gemini-3-pro
+
+A ':free' image model can intermittently 404 with "No endpoint found for model ..." even though the model name
+is correct and worked a minute earlier: OpenRouter's free tier is served by whichever provider currently
+volunteers to host that model for $0, and that pool's capacity comes and goes. generate() retries once on the
+paid (non-':free') version of the same model when this specific error shows up, and reports back which model
+actually produced the image so cost/credit tracking stays accurate — see model_used in its return value.
 """
 import base64
 
@@ -45,40 +51,63 @@ QUIRKS = {
 }
 
 
+def _is_no_endpoint(status: int, body_text: str) -> bool:
+    """True for OpenRouter's '404 No endpoint found for model ...' — a routing failure meaning no provider is
+    currently serving this exact model string, not that the model name is wrong. Free-tier (':free') models are
+    served by whoever currently volunteers to host them for $0, a pool with real capacity limits; that pool can
+    empty out between one request and the next with zero code change on our side; the same model string can work
+    again minutes later once a provider re-opens. This is distinct from a bad model name (which 404s the same way
+    but never used to work) or a missing capability (a different error shape, handled by QUIRKS above)."""
+    return status == 404 and "no endpoint found" in body_text.lower()
+
+
 def generate(model: str, prompt: str, images: list[bytes], size: str = "1K") -> tuple[bytes, float | None]:
     """Uses OpenRouter's unified Images API (POST /api/v1/images), not /chat/completions: several models —
     including OpenAI's gpt-image-1/gpt-image-1-mini — are only served through this dedicated endpoint and
     404 on chat/completions even with modalities:[image]. This endpoint also covers FLUX and the rest, with
     reference photos passed as input_references rather than chat image_url content.
-    Returns (image_bytes, real_usd_cost). The real cost comes straight from OpenRouter's own usage figure for
-    this exact request — accurate, unlike any hand-maintained per-model price table — and is None only if a
-    provider didn't report one, in which case the caller falls back to its own estimate."""
-    quirk = QUIRKS.get(model, {})
-    body = {"model": model, "prompt": prompt, "aspect_ratio": quirk.get("aspect_ratio", "4:5"), "response_format": "b64_json"}
-    if quirk.get("resolution", True):
-        body["resolution"] = RESOLUTIONS.get(size, "1K")
-    if "quality" in quirk:
-        body["quality"] = quirk["quality"].get(size, "medium")
-    if images:
-        body["input_references"] = [{"type": "image_url", "image_url": {"url": _url(b)}} for b in images]
-    r = httpx.post(IMAGES_URL, json=body, timeout=300, headers={"Authorization": f"Bearer {_key()}",
-                                                                 "HTTP-Referer": "https://skyblue.in", "X-Title": "Skyblue Product Studio"})
-    if r.status_code >= 400:
-        raise RuntimeError(f"OpenRouter {model} failed ({r.status_code}): {r.text[:300]}")
-    j = r.json()
-    if j.get("error"):
-        raise RuntimeError(f"OpenRouter {model}: {str(j['error'])[:300]}")
-    data = j.get("data") or []
-    if not data:
-        raise RuntimeError(f"OpenRouter {model} returned no image")
-    item = data[0]
-    cost = (j.get("usage") or {}).get("cost")
-    cost = float(cost) if isinstance(cost, (int, float)) else None
-    if item.get("b64_json"):
-        return base64.b64decode(item["b64_json"]), cost
-    if item.get("url"):
-        return httpx.get(item["url"], timeout=120).content, cost
-    raise RuntimeError(f"OpenRouter {model} returned no image data")
+    Returns (image_bytes, real_usd_cost, model_used). The real cost comes straight from OpenRouter's own usage
+    figure for this exact request — accurate, unlike any hand-maintained per-model price table — and is None only
+    if a provider didn't report one, in which case the caller falls back to its own estimate. model_used is the
+    model that actually generated the image: usually == model, but see the free-tier fallback below."""
+    tried = [model]
+    if model.endswith(":free"):
+        tried.append(model[:-len(":free")])   # same model, paid tier — only used if the free pool has no endpoint
+    last_err = None
+    for i, m in enumerate(tried):
+        quirk = QUIRKS.get(m, {})
+        body = {"model": m, "prompt": prompt, "aspect_ratio": quirk.get("aspect_ratio", "4:5"), "response_format": "b64_json"}
+        if quirk.get("resolution", True):
+            body["resolution"] = RESOLUTIONS.get(size, "1K")
+        if "quality" in quirk:
+            body["quality"] = quirk["quality"].get(size, "medium")
+        if images:
+            body["input_references"] = [{"type": "image_url", "image_url": {"url": _url(b)}} for b in images]
+        r = httpx.post(IMAGES_URL, json=body, timeout=300, headers={"Authorization": f"Bearer {_key()}",
+                                                                     "HTTP-Referer": "https://skyblue.in", "X-Title": "Skyblue Product Studio"})
+        if r.status_code >= 400:
+            # Only fall through to the paid variant for the specific "no endpoint" routing failure, and only
+            # when there's a next model to try — any other error (bad request, auth, real content policy
+            # block) should surface immediately rather than silently spend money on a retry that won't help.
+            if _is_no_endpoint(r.status_code, r.text) and i + 1 < len(tried):
+                last_err = f"OpenRouter {m} failed ({r.status_code}): {r.text[:300]}"
+                continue
+            raise RuntimeError(f"OpenRouter {m} failed ({r.status_code}): {r.text[:300]}")
+        j = r.json()
+        if j.get("error"):
+            raise RuntimeError(f"OpenRouter {m}: {str(j['error'])[:300]}")
+        data = j.get("data") or []
+        if not data:
+            raise RuntimeError(f"OpenRouter {m} returned no image")
+        item = data[0]
+        cost = (j.get("usage") or {}).get("cost")
+        cost = float(cost) if isinstance(cost, (int, float)) else None
+        if item.get("b64_json"):
+            return base64.b64decode(item["b64_json"]), cost, m
+        if item.get("url"):
+            return httpx.get(item["url"], timeout=120).content, cost, m
+        raise RuntimeError(f"OpenRouter {m} returned no image data")
+    raise RuntimeError(last_err or f"OpenRouter {model} failed")
 
 
 def complete(model: str, prompt: str, images: list[bytes] | None = None, json_mode: bool = False,
