@@ -10,6 +10,7 @@ Flow:  verified photos of ONE product code + master-sheet row + brand rules + sh
 Only the product's own photos are used. Nothing is searched for on the web.
 """
 import json
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -66,6 +67,7 @@ The 4 shots look like one photoshoot."""
 
 SCHEMA = {
     "photos": [{"index": 0, "is_this_product": True, "usable": True, "angle": "front|angle|side|back|top|detail|in_use|packaging|group",
+                "confidence": "high|medium|low — how sure you are about is_this_product/usable, NOT optional",
                 "reason_if_discarded": "",
                 "triage": {"verdict": "use|edit|reference|reject", "slot": "lifestyle|use_case|detail|none",
                            "only_this_product": True,
@@ -137,6 +139,11 @@ Do this in order and return ONE JSON object exactly in the schema at the end (th
 1. PHOTO CHECK - for every photo (index 0..n-1, in the order given): is it THIS product (same code / name / colourway)? Is it
    usable as a product reference (not a catalogue page, not a group of different products, not blurry or tiny)? Its angle.
    Mark wrong or unusable photos with a short reason. Be strict: a different colourway or design is NOT this product.
+   CONFIDENCE - say how sure you are of that is_this_product/usable call: "high" only when you are certain (e.g. a
+   clearly different product, or a clean, sharp, correct one); "medium" or "low" when the photo is ambiguous (poor
+   lighting, an unclear angle, a colourway that might just be this one under different light, a borderline crop) -
+   do not force a confident reject just to be strict; an honest "medium"/"low" is correct here and is handled safely
+   downstream, a wrongly-confident "high" reject is not.
 2. IDENTITY - type, form, parts, item count, states. If the photos show several identical items (e.g. 3 of the same pen)
    but the name does not say set/pack, the product is ONE item; say so. If they are different variants, only the one
    matching the code/name is this product.
@@ -146,6 +153,10 @@ Do this in order and return ONE JSON object exactly in the schema at the end (th
 4. SIZE - use any measurement visible in a photo or given in the facts; otherwise estimate from the product type and mark
    "estimated": true.
 5. USE & USER - purpose, who uses it (age group), how it is held or used, which hands (child / adult / none), what goes with it.
+   If the master sheet's facts below give an origin, material or audience, treat them as ground truth, not a guess to
+   weigh against the photos: your "audience" and "appearance.materials" must be consistent with what the sheet states
+   (refine with texture/finish/age detail the photos add, never contradict the sheet). Never invent an origin, material
+   or audience the sheet does not give and the photos cannot show.
 6. CATEGORY & ENVIRONMENT - category, the best real setting to shoot it (e.g. kid's study desk, office desk, art table),
    matching PROP TYPES (plain, generic, unbranded) and mood.
 7. HERO FEATURES - the 1-3 things a buyer must see. RISKS - what an image generator would likely get wrong. MUST KEEP.
@@ -256,6 +267,10 @@ def make_plan(s: Session, key: str, prov, charge=None) -> dict:
     facts = {"product_id": lp.product_id, "name": lp.name, "brand": lp.brand, "category": lp.category,
              "ean": lp.ean, "seo_title": (ld.get("titles") or {}).get("seo optimised title", ""),
              "photo_names": [i.src_name for i in imgs],
+             # straight from the master sheet - ground truth, not a guess (see step 5 above)
+             "origin": ld.get("origin", ""), "sheet_material": ld.get("sheet_material", ""),
+             "sheet_audience": ld.get("sheet_audience", ""), "contents": ld.get("contents", ""),
+             "key_features": ld.get("key_features", ""), "hsn": ld.get("hsn", ""),
              "official_website": {k: v for k, v in (ld.get("web") or {}).items() if k in ("url", "title", "description", "dimensions")},
              "skyblue_store": {"title": (ld.get("store") or {}).get("title", ""), "description": ld.get("store_description", "")}}
     busy = any(w in (lp.name or "").lower() for w in ("set", " x", "pack", "assorted", "colours", "colors"))
@@ -269,23 +284,31 @@ def make_plan(s: Session, key: str, prov, charge=None) -> dict:
     if charge:
         from . import config
         charge(used)
-    # photo check -> Discarded section
-    discarded = []
+    # photo check -> Discarded section. Only a HIGH-confidence reject is actually discarded; a medium/low-confidence
+    # one is kept in play but flagged, so an uncertain call never silently empties the queue before shot 4 (the
+    # earlier binary accept/discard did exactly that whenever the model was strict but not sure).
+    discarded, borderline = [], []
     checks = {int(p.get("index", -1)): p for p in plan.get("photos") or [] if isinstance(p, dict)}
     for n, img in enumerate(imgs):
         c = checks.get(n) or {}
         if c.get("angle"):
             img.meta = {**(img.meta or {}), "angle": str(c["angle"]).split("|")[0].strip().lower()}
         bad = c.get("is_this_product") is False or c.get("usable") is False
+        confidence = str(c.get("confidence", "high") or "high").strip().lower()
         if bad and not (img.meta or {}).get("keep"):
-            img.meta = {**(img.meta or {}), "discarded": {"reason": c.get("reason_if_discarded") or "not this product",
-                                                           "by": "ai", "at": _now()}}
-            img.primary = False
-            discarded.append(img.id)
+            reason = c.get("reason_if_discarded") or "not this product"
+            if confidence == "high":
+                img.meta = {**(img.meta or {}), "discarded": {"reason": reason, "by": "ai", "at": _now(), "confidence": confidence}}
+                img.primary = False
+                discarded.append(img.id)
+            else:
+                img.meta = {**(img.meta or {}), "borderline": {"reason": reason, "by": "ai", "at": _now(), "confidence": confidence}}
+                borderline.append(img.id)
     left = [i for i in imgs if i.id not in discarded]
     if left and not any(i.primary for i in left):
         left[0].primary = True
     record = {"json": plan, "model": used, "at": _now(), "photos": [i.id for i in imgs], "discarded": discarded,
+              "borderline": borderline,
               "approved": False, "approved_by": "", "edited": False, "stale": False,
               "status": "ok" if left else "no_valid_photos"}
     old_mem = ld.get("memory") or {}
@@ -298,6 +321,7 @@ def make_plan(s: Session, key: str, prov, charge=None) -> dict:
                  json.dumps(record, ensure_ascii=False, indent=1).encode())
     log(s, "planner", f"{lp.product_id or key}: analysed {len(imgs)} photo(s) with {used}"
                       + (f", {len(discarded)} discarded" if discarded else "")
+                      + (f", {len(borderline)} borderline (kept)" if borderline else "")
                       + (" · needs review" if plan.get("review_needed") else ""))
     s.commit()
     return record
@@ -308,7 +332,11 @@ def _now() -> str:
 
 
 def memory_facts(plan: dict, ld: dict) -> dict:
-    """The analysis in the older 'product memory' shape, so QC and descriptions keep working."""
+    """The analysis in the older 'product memory' shape, so QC and descriptions keep working.
+    Also the single place sheet-only catalog facts (origin, contents, key features, HSN) join the rest of the
+    product's known facts - plain pass-through, no model involved, since no photo can show a country of origin and
+    there's nothing to analyse: shopq.py's SEO title/description already read this same dict as "facts" and will
+    pick these up with no further changes."""
     ap, idn = plan.get("appearance") or {}, plan.get("identity") or {}
     text = [t.get("text", "") if isinstance(t, dict) else str(t) for t in ap.get("printed_text") or []]
     logo = (ap.get("logo") or {}).get("text")
@@ -322,7 +350,8 @@ def memory_facts(plan: dict, ld: dict) -> dict:
             "shape": idn.get("form", ""), "parts": idn.get("parts") or [],
             "material": ", ".join(ap.get("materials") or []) + (f"; {ap['finish']}" if ap.get("finish") else ""),
             "size": (plan.get("size") or {}).get("dimensions", ""), "must_keep": plan.get("must_keep") or [],
-            "watch": list(dict.fromkeys(watch + (plan.get("risks") or [])))[:10]}
+            "watch": list(dict.fromkeys(watch + (plan.get("risks") or [])))[:10],
+            **{k: ld[k] for k in ("origin", "contents", "key_features", "hsn") if ld.get(k)}}
 
 
 def gate(plan: dict) -> dict:
@@ -483,11 +512,69 @@ def render(plan: dict, kind: str, static: str, anchored: bool, approved_facts: s
     return "\n".join(x for x in lines if x)
 
 
+# Gemini's own image model reads dense photographic jargon (focal length in mm, f-stop, colour temp in Kelvin)
+# reliably; FLUX and gpt-image (both reached through OpenRouter) read it less reliably and can latch onto the
+# numbers as stylistic text rather than a camera instruction. render() stays one shared template either way -
+# duplicating it per model would be a maintenance trap - and this is applied once, after rendering, only for the
+# model that will actually execute this attempt (so it still adapts correctly if escalation switches models
+# mid-retry, since pipeline.py calls it fresh inside the retry loop, not once up front).
+_JARGON = [(re.compile(r"\b\d{2,3}(-\d{2,3})?\s?mm\b[^.,;]*"), ""),         # "85-100mm look", "35-50mm look"
+           (re.compile(r"\bf/\d+(-f/?\d+)?\b"), ""),                        # "f/8-f/11", "f/8"
+           (re.compile(r"\(?about \d{3,4}\s?K\)?"), "warm, true-to-life daylight")]
+
+
+def dialect(prompt: str, model: str) -> str:
+    """No-op for Gemini (the template is already tuned for it). For an openrouter: model, strip the heaviest
+    camera jargon to plain language and bookend the hard product-identity constraint at both the start and end of
+    the prompt, since these models weight the ends of a long prompt more than the middle."""
+    if not str(model).startswith("openrouter:"):
+        return prompt
+    out = prompt
+    for pat, repl in _JARGON:
+        out = pat.sub(repl, out)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    lock = next((ln for ln in out.splitlines() if ln.startswith("PRODUCT - DO NOT CHANGE:")), "")
+    return f"{lock}\n{out}\n{lock}" if lock else out
+
+
 def for_product(plan: dict, lp) -> dict:
     """The plan as used for rendering, with what is known about the product outside the analysis (is it unbranded?)."""
     from .dataset import UNBRANDED
     label = str(getattr(lp, "brand", "") or "").strip().lower()
     return {**plan, "_unbranded": True} if label in UNBRANDED and not (plan.get("_brand") or {}).get("brand_name") else plan
+
+
+def colour_check(img_bytes: bytes, plan: dict, tolerance: int = 70) -> tuple[bool, str]:
+    """Cheap, deterministic sanity check run BEFORE paying for a full QC vision call: does any pixel anywhere in
+    the generated image fall within a generous tolerance of one of the colours the analysis locked in (hex, from
+    appearance.colours)? This only catches an outright wrong colour (e.g. a logo rendered in a different hue
+    entirely, like the blue-instead-of-white case that was QC'd and verified in Nov 2026) - a real vision QC call
+    still runs on every shot that passes this; it only means an obviously-wrong shot skips straight to
+    retry/escalate without first spending that call. True/"" when there's nothing to check against (no locked
+    colours) or on any decode problem - this must never block a generation on its own trouble."""
+    import io
+    from PIL import Image
+    colours = [c.get("hex") for c in (plan.get("appearance") or {}).get("colours") or [] if isinstance(c, dict) and c.get("hex")]
+    targets = []
+    for hx in colours:
+        hx = str(hx).lstrip("#")
+        if len(hx) == 6:
+            try:
+                targets.append(tuple(int(hx[i:i + 2], 16) for i in (0, 2, 4)))
+            except ValueError:
+                pass
+    if not targets:
+        return True, ""
+    try:
+        im = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        im.thumbnail((120, 120))                 # coarse on purpose - this is a ballpark check, not QC
+        pixels = im.getcolors(maxcolors=120 * 120) or []
+    except Exception:
+        return True, ""
+    for _, rgb in pixels:
+        if any(all(abs(a - b) <= tolerance for a, b in zip(rgb, t)) for t in targets):
+            return True, ""
+    return False, f"none of the locked colours ({', '.join(colours)}) appear anywhere in the generated image"
 
 
 def qc_facts(plan: dict) -> str:

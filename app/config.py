@@ -2,7 +2,11 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "5.4.4 (OpenRouter free-tier image models auto-retry on the paid variant when the free pool has no endpoint, instead of failing the shot)"
+APP_VERSION = ("5.5.0 (main-agent grounding: sheet-stated origin/material/audience/contents/HSN/features now feed the "
+               "analysis and the SEO listing instead of being ignored; photo rejection is confidence-scored, not "
+               "binary, so an unsure call no longer silently empties the queue; shot prompts adapt their phrasing "
+               "for OpenRouter models instead of staying Gemini-shaped; a cheap pixel check catches an outright "
+               "colour mismatch before spending a QC call)")
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

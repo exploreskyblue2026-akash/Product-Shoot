@@ -1414,3 +1414,44 @@ def test_openrouter_free_tier_falls_back_to_paid_on_no_endpoint():
             assert "404" in str(e)
     finally:
         httpx.post, openrouter._key = og_post, og_key
+
+
+def test_dialect_strips_jargon_only_for_openrouter_models():
+    """Gemini's own image model is already tuned for the dense photographic jargon (focal length, f-stop, Kelvin)
+    in planner.render()'s template; FLUX/gpt-image (via OpenRouter) read that jargon less reliably. dialect()
+    should leave a Gemini prompt untouched, and for an openrouter: model strip the jargon to plain language and
+    bookend the 'PRODUCT - DO NOT CHANGE' constraint at both ends."""
+    from app import planner
+    sample = ("PRODUCT - DO NOT CHANGE: a green pencil case.\n"
+              "CAMERA: 85-100mm look, f/8-f/11 so the whole product is sharp.\n"
+              "STUDIO LOOK: neutral white balance (about 5200 K); whites stay white.")
+    assert planner.dialect(sample, "gemini-3-pro-image") == sample          # untouched for Gemini
+    out = planner.dialect(sample, "openrouter:black-forest-labs/flux.2-pro")
+    assert "mm look" not in out and "f/8" not in out and "5200 K" not in out
+    assert out.count("PRODUCT - DO NOT CHANGE: a green pencil case.") == 3  # original line + bookended start and end
+    assert out.splitlines()[0] == "PRODUCT - DO NOT CHANGE: a green pencil case."
+    assert out.splitlines()[-1] == "PRODUCT - DO NOT CHANGE: a green pencil case."
+
+
+def test_colour_check_catches_outright_mismatch_cheaply():
+    """Deterministic, non-LLM pre-check: does any pixel in the generated image fall near a locked hex colour?
+    Catches an outright wrong colour (the Nov 2026 blue-logo-instead-of-white case) before paying for a QC call."""
+    import io
+    from PIL import Image
+    from app import planner
+
+    plan = {"appearance": {"colours": [{"name": "white", "hex": "#FFFFFF", "where": "logo"}]}}
+
+    def solid(rgb):
+        b = io.BytesIO()
+        Image.new("RGB", (40, 40), rgb).save(b, "JPEG")
+        return b.getvalue()
+
+    ok, note = planner.colour_check(solid((255, 255, 255)), plan)
+    assert ok and note == ""                                    # the locked colour is right there
+    ok, note = planner.colour_check(solid((20, 20, 200)), plan)  # rendered blue instead of white
+    assert not ok and "#FFFFFF" in note
+
+    # nothing locked to check against -> never blocks
+    ok, _ = planner.colour_check(solid((20, 20, 200)), {"appearance": {}})
+    assert ok

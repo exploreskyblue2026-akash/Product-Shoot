@@ -234,27 +234,36 @@ def process(pid: int, only: list[int] | None = None):
                     break
                 sh.attempts = (sh.attempts or 0) + 1
                 try:
-                    img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=call_refs, style=None))
+                    img = storage.to_output(prov.generate(planner.dialect(prompt, model), shot_raw, model, size, refs=call_refs, style=None))
                 except Exception as e:                    # model unavailable / refused: use the upgrade model once
                     if not escalate or escalated or escalate == model:
                         raise
                     print(f"[pipeline] {model} failed for {p.code} shot {no}, using {escalate}: {str(e)[:160]}")
                     model, escalated = escalate, True
-                    img = storage.to_output(prov.generate(prompt, shot_raw, model, size, refs=call_refs, style=None))
+                    img = storage.to_output(prov.generate(planner.dialect(prompt, model), shot_raw, model, size, refs=call_refs, style=None))
                 used = getattr(prov, "last_model", None) or model     # may differ after a fallback
                 real_cost = getattr(prov, "last_cost", None)          # OpenRouter's own reported cost, if it gave one
                 sh.model = used
                 _charge(s, p, "image", used, real_cost if real_cost is not None else config.image_cost(used, size), sh)
                 rel = storage.save(f"shots/{storage.safe(p.code)}/{no}-{sh.kind}-a{sh.attempts}.jpg", img)
-                try:
-                    qref = _sheet([hero_ref, shot_raw] if hero_ref else [shot_raw] + refs[:2])
-                    result = prov.qc(qref, img, {"kind": sh.kind, "no": no, "facts": facts, "sheet": True,
-                                                 "vs_hero": bool(hero_ref)}, rv.data)
-                    _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
-                except Exception as e:                   # keep the image; a person checks it instead
-                    print(f"[pipeline] QC failed for {p.code} shot {no}: {e}")
-                    result = {"checks": {}, "reasons": {"qc": f"Automatic QC unavailable: {str(e)[:200]}"},
-                              "unchecked": True}
+                # cheap pixel check first, only when colour_match is actually enforced (CRITICAL in light mode
+                # doesn't include it) - an outright wrong colour skips straight to retry/escalate without first
+                # spending a vision QC call that would just confirm the same thing.
+                colour_ok, colour_note = (True, "") if qc_mode == "light" else planner.colour_check(img, plan)
+                if not colour_ok:
+                    from .providers.gemini import QC_CHECKS
+                    result = {"checks": {**{k: True for k in QC_CHECKS}, "colour_match": False},
+                              "reasons": {"colour_match": colour_note}}
+                else:
+                    try:
+                        qref = _sheet([hero_ref, shot_raw] if hero_ref else [shot_raw] + refs[:2])
+                        result = prov.qc(qref, img, {"kind": sh.kind, "no": no, "facts": facts, "sheet": True,
+                                                     "vs_hero": bool(hero_ref)}, rv.data)
+                        _charge(s, p, "qc", config.model_name(config.MODEL_VISION), config.COST_VISION, sh)
+                    except Exception as e:                   # keep the image; a person checks it instead
+                        print(f"[pipeline] QC failed for {p.code} shot {no}: {e}")
+                        result = {"checks": {}, "reasons": {"qc": f"Automatic QC unavailable: {str(e)[:200]}"},
+                                  "unchecked": True}
                 result["how"] = {"method": "fresh"}
                 result["sent"] = {**sent, "model": sh.model or model, "size": size}
                 sh.image_path, sh.qc = rel, result
@@ -309,7 +318,7 @@ def _reuse_input(s: Session, p: Product, sh: Shot, rec: dict, prov, model: str, 
         edit_model = (get_setting(s, "model_edit", "") or "").strip() or model
         prompt = planner.EDIT_PROMPT.format(edits="\n".join(f"- {e}" for e in pick["edits"]))
         try:
-            out = storage.to_output(prov.generate(prompt, data, edit_model, size, refs=[], style=None))
+            out = storage.to_output(prov.generate(planner.dialect(prompt, edit_model), data, edit_model, size, refs=[], style=None))
         except Exception as e:
             print(f"[pipeline] light edit failed for {p.code} {sh.kind}: {e}")
             return False

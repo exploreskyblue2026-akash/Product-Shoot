@@ -112,6 +112,19 @@ def import_master(s: Session, data: bytes, filename: str = "master.xlsx") -> dic
                     extra.setdefault("titles", {})[hl] = str(v).strip()
                 elif hl in ("hsn code",):
                     extra["hsn"] = str(v)
+                # Catalog facts the sheet already states — captured so the analysis step can treat them as ground
+                # truth instead of re-guessing audience/material from pixels alone, and so origin/features/contents
+                # (which no photo can show) reach the SEO listing at all, which they never did before this.
+                elif hl in ("origin", "country of origin", "made in"):
+                    extra["origin"] = str(v).strip()
+                elif hl in ("material", "materials"):
+                    extra["sheet_material"] = str(v).strip()
+                elif hl in ("audience", "target audience", "user group", "age group"):
+                    extra["sheet_audience"] = str(v).strip()
+                elif hl in ("contents", "what's in the box", "in the box", "package contents"):
+                    extra["contents"] = str(v).strip()
+                elif hl in ("key features", "key feature", "features"):
+                    extra["key_features"] = str(v).strip()
             p.data = {**{k: v for k, v in (p.data or {}).items() if k != "prices"}, **extra}
             name = str(_cell(r, m.get("name"))).strip()[:300]
             cat = str(_cell(r, m.get("category"))).strip()[:80]
