@@ -2,9 +2,10 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.5.1 (brand context: hero_backdrop/signature_props/mood_override/human_allowed were researched and "
-               "stored per brand but never reached the analysis prompt - now wired in; TROIKA's identity corrected "
-               "against troika.de directly - keyring added to signature_props, website fixed to the consumer site)")
+APP_VERSION = ("5.5.2 (Library page was overloaded: every poll rendered up to 300 full product cards at once, each "
+               "one eagerly embedding its whole analysis JSON into a hidden edit textarea - now caps the first "
+               "render at 60 cards with a Show more button, and the JSON textarea only fills in once you actually "
+               "open that card's Edit plan section)")
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
