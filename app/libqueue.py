@@ -218,7 +218,7 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
     auto_send = get_setting(s, "auto_send_studio", False)
     workers = max(1, min(6, int(get_setting(s, "prep_workers", 3) or 3)))
     todo = [(n, it) for n, it in enumerate(items, 1)
-            if (it.get("prep") or {}).get("state") not in ("ready", "sent", "not_found")]
+            if (it.get("prep") or {}).get("state") not in ("ready", "sent", "not_found", "rejected")]
     total, done = len(items), 0
 
     def run(n, it):
@@ -287,4 +287,54 @@ def reset_item(s: Session, code: str):
         if it["code"] == code:
             it["prep"] = {"state": "waiting"}
     set_setting(s, "shoot_list", items)
+    s.commit()
+
+
+def reject_item(s: Session, code: str, reason: str = ""):
+    """The main agent (or a person) decided this code should not be shot. It stays visible, in its own Rejected
+    section, and is never reprocessed again unless someone restores it."""
+    items = list(get_setting(s, "shoot_list", []) or [])
+    for it in items:
+        if it["code"] == code:
+            it["prep"] = {**(it.get("prep") or {}), "state": "rejected", "rejected_reason": reason, "at": _now()}
+    set_setting(s, "shoot_list", items)
+    log(s, "library", f"Library queue: {code} rejected" + (f" ({reason})" if reason else ""))
+    s.commit()
+
+
+def restore_item(s: Session, code: str):
+    """Undo a reject: back to waiting, so the main agent picks it up again."""
+    items = list(get_setting(s, "shoot_list", []) or [])
+    for it in items:
+        if it["code"] == code:
+            it["prep"] = {"state": "waiting"}
+    set_setting(s, "shoot_list", items)
+    s.commit()
+
+
+def auto_tick(s: Session) -> None:
+    """Continuous, event-driven main agent: every worker tick, do at most one Library-queue code (identify -> photos
+    -> analysis -> ready, then straight into the Studio queue if that setting is on) - no manual 'Prepare now' click,
+    no waiting for the 30-minute scan. 'waiting' codes (just pasted/dropped) and 'review' codes (a plan was just
+    approved) are picked up here; 'needs_photo'/'error'/'not_found' wait for new photos or a Retry click, since
+    repeating the same website/store lookup every few seconds would find nothing new and only burn API calls, and
+    'rejected' codes are left alone until someone restores them."""
+    if not get_setting(s, "auto_prepare", True):
+        return
+    items = list(get_setting(s, "shoot_list", []) or [])
+    todo = [it for it in items if (it.get("prep") or {}).get("state", "waiting") in ("waiting", "review")]
+    if not todo:
+        return
+    from .pipeline import day_spend
+    if day_spend(s) >= float(get_setting(s, "daily_budget", 3.0)):
+        return
+    use_web = get_setting(s, "use_websites", True)
+    new = _prep_one(s, todo[0], 1, len(todo), time.time() + 120, use_web)
+    cur = list(get_setting(s, "shoot_list", []) or [])          # re-read: codes may have been added meanwhile
+    for i, x in enumerate(cur):
+        if x["code"] == new["code"]:
+            cur[i] = {**x, **{k: new[k] for k in ("key", "match", "prep") if k in new}}
+    if (new.get("prep") or {}).get("state") == "ready" and get_setting(s, "auto_send_studio", False):
+        send(s, [new["key"]], cur)
+    set_setting(s, "shoot_list", cur)
     s.commit()

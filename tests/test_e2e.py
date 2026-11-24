@@ -1196,6 +1196,43 @@ def test_library_queue_codes_any_brand_website_first_then_studio():
         assert {"KR1805BR", "NEWPEN77"} <= queued
 
 
+def test_libqueue_auto_tick_reject_restore():
+    """The main agent advances the Library queue on its own, tick by tick - no 'Prepare now' click needed - never
+    silently drops a code it can't finish (it stays with its reason instead), and a rejected code moves out of the
+    main table into its own Rejected section until someone restores it."""
+    from app import libqueue
+    from app.db import SessionLocal
+    c = client()
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (Path(__file__).parent / "library" / "master.xlsx").read_bytes(), "x/y"))])
+    wait_job(c)
+    c.put("/api/admin/settings", json={"auto_prepare": True})
+    c.post("/api/library/codes", json={"text": "PIP20/BL\nPEN56/BK"})
+    wait_job(c)
+    with SessionLocal() as s:                              # isolate auto_tick itself: put both back to 'waiting'
+        libqueue.reset_item(s, "PIP20/BL"); libqueue.reset_item(s, "PEN56/BK")
+    with SessionLocal() as s:
+        libqueue.auto_tick(s)                               # one tick -> exactly one code moves off 'waiting'
+    q = {i["code"]: i for i in c.get("/api/library").json()["lqueue"]}
+    moved = [k for k in ("PIP20/BL", "PEN56/BK") if q[k]["prep"]["state"] != "waiting"]
+    assert len(moved) == 1, q
+    with SessionLocal() as s:
+        libqueue.auto_tick(s)                               # next tick -> the other one moves too
+    q = {i["code"]: i for i in c.get("/api/library").json()["lqueue"]}
+    assert q["PIP20/BL"]["prep"]["state"] == "needs_photo" and q["PIP20/BL"]["prep"]["why"]
+    assert q["PEN56/BK"]["prep"]["state"] == "needs_photo" and q["PEN56/BK"]["prep"]["why"]
+    r = c.post("/api/library/queue/reject", json={"text": "PIP20/BL", "reason": "wrong product line"}).json()
+    assert r["rejected"] == 1
+    q = {i["code"]: i for i in c.get("/api/library").json()["lqueue"]}
+    assert q["PIP20/BL"]["prep"]["state"] == "rejected"
+    with SessionLocal() as s:
+        libqueue.auto_tick(s)                               # a rejected code is never touched again on its own
+    q = {i["code"]: i for i in c.get("/api/library").json()["lqueue"]}
+    assert q["PIP20/BL"]["prep"]["state"] == "rejected"
+    c.post("/api/library/queue/restore", json={"text": "PIP20/BL"})
+    q = {i["code"]: i for i in c.get("/api/library").json()["lqueue"]}
+    assert q["PIP20/BL"]["prep"]["state"] == "waiting"      # back in play for the agent
+
+
 def test_brand_reference_photo_filed_via_website_ean():
     import io
     from PIL import Image, ImageDraw

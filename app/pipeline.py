@@ -444,8 +444,9 @@ def tick() -> bool:
     try:
         with SessionLocal() as s:
             rescan_watched(s)
-            from . import v2
+            from . import v2, libqueue
             v2.auto_sync_queue(s)
+            libqueue.auto_tick(s)
             pid = next_job(s)
             only = None
             if pid:

@@ -898,6 +898,33 @@ def library_retry(body: CodesIn, u=Depends(need("editor"))):
     return {"ok": True}
 
 
+class RejectIn(BaseModel):
+    text: str = ""       # one code per line
+    reason: str = ""
+
+
+@app.post("/api/library/queue/reject")
+def library_reject(body: RejectIn, u=Depends(need("editor"))):
+    from . import libqueue
+    with SessionLocal() as s:
+        n = 0
+        for c in [x.strip() for x in body.text.split("\n") if x.strip()]:
+            libqueue.reject_item(s, c, body.reason)
+            n += 1
+    return {"ok": True, "rejected": n}
+
+
+@app.post("/api/library/queue/restore")
+def library_restore(body: CodesIn, u=Depends(need("editor"))):
+    from . import libqueue
+    with SessionLocal() as s:
+        n = 0
+        for c in [x.strip() for x in body.text.split("\n") if x.strip()]:
+            libqueue.restore_item(s, c)
+            n += 1
+    return {"ok": True, "restored": n}
+
+
 @app.get("/api/library")
 def library_state(u=Depends(need("viewer"))):
     job = dict(_lib_job)                    # read first: a job that is finished here is in the data below
