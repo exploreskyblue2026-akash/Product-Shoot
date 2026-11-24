@@ -2,10 +2,13 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.5.2 (Library page was overloaded: every poll rendered up to 300 full product cards at once, each "
+APP_VERSION = ("5.5.3 (Library page was overloaded: every poll rendered up to 300 full product cards at once, each "
                "one eagerly embedding its whole analysis JSON into a hidden edit textarea - now caps the first "
                "render at 60 cards with a Show more button, and the JSON textarea only fills in once you actually "
-               "open that card's Edit plan section)")
+               "open that card's Edit plan section. Studio queue: 'Load shoot sheet into queue' used to dump every "
+               "code ever added to the shoot sheet - including stale no-photo/error rows - into the queue every "
+               "time; you can now type the exact codes you want queued (they jump to the top), and clear stuck "
+               "no-photo/error rows in one click without touching healthy queue items)")
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

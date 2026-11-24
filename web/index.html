@@ -159,6 +159,8 @@ body{margin:0}[hidden]{display:none!important}
       <p class="hint" style="margin:0" id="v2-sum">—</p>
       <button class="btn primary" type="button" id="v2-load" style="width:100%">Load shoot sheet into queue</button>
       <p class="hint" style="margin:0">Drag products in the queue to change their order. Only the codes in the shoot sheet are queued, with only the shots it asks for. The AI gets each product's best Library photos (up to 3 angles). Drive folders are not watched in this mode.</p>
+      <label class="field" style="margin-top:8px">Or queue just these codes (one per line)<textarea id="v2-codes" rows="3" placeholder="081264FRS&#10;BBG64/GY"></textarea></label>
+      <button class="btn primary" type="button" id="v2-codes-add" style="width:100%">Add these codes to queue</button>
     </section>
 
     <section class="sec v1only" aria-labelledby="in-h">
@@ -194,6 +196,7 @@ body{margin:0}[hidden]{display:none!important}
 
     <section class="sec" aria-labelledby="q-h">
       <div class="sec-h"><h2 id="q-h"><span class="step-n">2</span>Queue</h2><span class="hint">by product code</span></div>
+      <button class="btn sm" type="button" id="q-clear-stuck" style="width:100%;margin-bottom:6px" title="Remove rows stuck as 'No photo' or 'Error' from the queue">Clear stuck (no photo / error) rows</button>
       <div class="list scroll" id="queue"></div>
     </section>
 
@@ -338,6 +341,10 @@ $("#ap").addEventListener("click",()=>{const on=$("#ap").getAttribute("aria-chec
 document.querySelectorAll(".mode [data-mode]").forEach(b=>b.addEventListener("click",async()=>{if(b.getAttribute("aria-checked")=="true")return;
   try{await api("/api/autopilot",{method:"POST",body:{pipeline_mode:b.dataset.mode}});cur=null;P=null;toast(b.dataset.mode=="v2"?"Shoot sheet mode: only the codes and shots in the sheet":"Add input mode");await refresh()}catch(e){toast(e.message)}}));
 $("#v2-load").addEventListener("click",async()=>{try{const r=await api("/api/v2/load-shoot",{method:"POST"});toast(`${r.total} codes: ${r.total-r.waiting-r.missing} ready to generate, ${r.waiting} waiting for photo/cut-out, ${r.missing} not in master`);await refresh()}catch(e){toast(e.message)}});
+$("#v2-codes-add").addEventListener("click",async()=>{const v=$("#v2-codes").value.trim();if(!v)return toast("Type at least one product code");
+  try{const r=await api("/api/v2/queue-codes",{method:"POST",body:{text:v}});$("#v2-codes").value="";
+    toast(`${r.total} queued${r.not_found.length?`, not found: ${r.not_found.join(", ")}`:""}`);await refresh()}catch(e){toast(e.message)}});
+$("#q-clear-stuck").addEventListener("click",async()=>{try{const r=await api("/api/v2/clear-stuck",{method:"POST"});toast(`${r.removed} stuck row(s) removed`);await refresh()}catch(e){toast(e.message)}});
 // drag & drop priority in the queue
 (()=>{const box=$("#queue");let drag=null;
   box.addEventListener("dragstart",e=>{drag=e.target.closest(".qrow");if(!drag)return;drag.classList.add("dragging");e.dataTransfer.effectAllowed="move"});

@@ -95,6 +95,51 @@ def load_items(s: Session, items: list[dict]) -> dict:
     return {"added": added, "updated": updated, "waiting": waiting, "missing": missing, "total": len(items)}
 
 
+# ------------------------------------------------------------------ queue exact codes you type in
+def queue_codes(s: Session, codes: list[str]) -> dict:
+    """Queue ONLY the codes typed in, instead of the whole shoot sheet. A typed code already on the shoot
+    sheet keeps its shots/note from there; a code not on the sheet is still queued (all 4 shots, no note) as
+    long as it resolves to a product in the Library. Newly typed codes jump to the top of the queue."""
+    from .library import _index, resolve
+    codes = [c.strip() for c in (codes or []) if c and c.strip()]
+    if not codes:
+        raise ValueError("Type at least one product code.")
+    sheet_by_key = {}
+    for it in (get_setting(s, "shoot_list", []) or []):
+        if it.get("key"):
+            sheet_by_key[it["key"]] = it
+    idx = _index(s)
+    items, not_found = [], []
+    for n, code in enumerate(codes):
+        lp, how = resolve(code, idx)
+        if not lp:
+            not_found.append(code)
+            continue
+        sh = sheet_by_key.get(lp.key, {})
+        items.append({"key": lp.key, "code": sh.get("code", code), "shots": sh.get("shots", []),
+                      "note": sh.get("note", ""), "priority": n - len(codes)})   # negative: floats to the top
+    if not items:
+        raise ValueError(f"None of those codes were found in the master sheet or Library: {', '.join(not_found)}")
+    r = load_items(s, items)
+    r["not_found"] = not_found
+    log(s, "v2", f"Queued {len(items)} typed code(s): {r['added']} new, {r['updated']} updated"
+                 + (f"; not found: {', '.join(not_found)}" if not_found else ""))
+    s.commit()
+    return r
+
+
+def clear_stuck(s: Session) -> int:
+    """Remove v2 queue rows stuck as 'no photo' or 'error' (e.g. after loading the whole shoot sheet).
+    Never touches anything mid-generation, under review, or already saved."""
+    rows = [p for p in s.scalars(select(Product).where(Product.stage.in_(["error", "needs_photo"])))
+            if (p.data or {}).get("v2")]
+    n = len(rows)
+    for p in rows:
+        s.delete(p)
+    s.commit()
+    return n
+
+
 def retire_scene(s: Session, scene_id: int):
     """Kept for the old scene pool's rows still sitting in the database; nothing writes new ones any more."""
     a = s.get(SceneAsset, scene_id)

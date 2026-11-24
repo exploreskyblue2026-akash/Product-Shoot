@@ -320,6 +320,46 @@ def test_shoot_sheet_queue_order_and_requested_shots():
     c.put("/api/admin/settings", json={"library_cutouts": False, "engine_mode": "classic", "planner_on": True})
 
 
+def test_v2_queue_codes_and_clear_stuck():
+    """Typing specific codes queues only those (not the whole shoot sheet), and 'clear stuck' removes just the
+    error/needs_photo rows without touching anything else in the queue."""
+    import io, openpyxl
+    from PIL import Image, ImageDraw
+    c = client()
+    LIB = Path(__file__).parent / "library"
+    def photo(color):
+        im = Image.new("RGB", (1000, 1000), (255, 255, 255))
+        ImageDraw.Draw(im).rectangle([250, 300, 750, 700], fill=color)
+        b = io.BytesIO(); im.save(b, "PNG"); return b.getvalue()
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["SHOOT", "SHOTS", "PRIORITY", "NOTE"])
+    # BCO64/GY and BG044/DB are real master-sheet codes untouched by any other test; QC-NOPE is not in the master
+    ws.append(["BCO64/GY", "", 1, ""]); ws.append(["BG044/DB", "", 2, ""]); ws.append(["QC-NOPE", "", 3, ""])
+    b = io.BytesIO(); wb.save(b)
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "x/y")),
+                                         ("files", ("qcshoot.xlsx", b.getvalue(), "x/y")),
+                                         ("files", ("BCO64-GY front.jpg", photo((90, 90, 100)), "image/jpeg"))])
+    wait_job(c)
+    # typing just one code queues only that one, not the whole 3-code sheet
+    r = c.post("/api/v2/queue-codes", json={"text": "BCO64/GY\nNOT-REAL-CODE"}).json()
+    assert r["total"] == 1 and r["not_found"] == ["NOT-REAL-CODE"], r
+    st = c.get("/api/state").json()
+    codes = {q["code"] for q in st["queue"]}
+    assert "BCO64/GY" in codes and "BG044/DB" not in codes and "QC-NOPE" not in codes, codes
+    gy_id = next(q["id"] for q in st["queue"] if q["code"] == "BCO64/GY")
+    assert st["queue"][0]["id"] == gy_id                         # typed code floats to the top
+    # now bulk-load the whole sheet so the error/needs_photo rows exist, then clear just those
+    c.post("/api/v2/load-shoot")
+    before = c.get("/api/state").json()["queue"]
+    assert any(q["code"] == "QC-NOPE" for q in before)           # not in master -> error row present
+    r = c.post("/api/v2/clear-stuck").json()
+    assert r["removed"] >= 2, r                                  # QC-NOPE (error) + BG044/DB (needs_photo)
+    after = c.get("/api/state").json()["queue"]
+    after_codes = {q["code"] for q in after}
+    assert "QC-NOPE" not in after_codes and "BG044/DB" not in after_codes
+    assert "BCO64/GY" in after_codes                              # the healthy, ready row is left alone
+
+
 def test_saved_hero_only_can_make_more():
     """A product auto-saved with only the hero can still get shots 2-5 from the approve button."""
     c = client()

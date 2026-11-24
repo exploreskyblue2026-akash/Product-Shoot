@@ -1,4 +1,5 @@
 """FastAPI app: serves the approved UI and the API behind it. Start: uvicorn app.main:app"""
+import re
 import threading
 from datetime import datetime, timedelta, timezone
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -1041,6 +1042,35 @@ def v2_load(u=Depends(need("editor"))):
         s.commit()
     pipeline.STOP.clear()
     return {"ok": True, **r}
+
+
+class CodesIn(BaseModel):
+    text: str = ""
+
+
+@app.post("/api/v2/queue-codes")
+def v2_queue_codes(body: CodesIn, u=Depends(need("editor"))):
+    from . import v2
+    codes = [c.strip() for c in re.split(r"[\n,]+", body.text) if c.strip()]
+    with SessionLocal() as s:
+        try:
+            r = v2.queue_codes(s, codes)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        log(s, u.email, f"Queued {len(codes) - len(r['not_found'])} typed code(s)")
+        s.commit()
+    pipeline.STOP.clear()
+    return {"ok": True, **r}
+
+
+@app.post("/api/v2/clear-stuck")
+def v2_clear_stuck(u=Depends(need("editor"))):
+    from . import v2
+    with SessionLocal() as s:
+        n = v2.clear_stuck(s)
+        log(s, u.email, f"Cleared {n} stuck ('no photo'/'error') item(s) from the queue")
+        s.commit()
+    return {"ok": True, "removed": n}
 
 
 class MoveIn(BaseModel):
