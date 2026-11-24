@@ -2,11 +2,9 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.5.0 (main-agent grounding: sheet-stated origin/material/audience/contents/HSN/features now feed the "
-               "analysis and the SEO listing instead of being ignored; photo rejection is confidence-scored, not "
-               "binary, so an unsure call no longer silently empties the queue; shot prompts adapt their phrasing "
-               "for OpenRouter models instead of staying Gemini-shaped; a cheap pixel check catches an outright "
-               "colour mismatch before spending a QC call)")
+APP_VERSION = ("5.5.1 (brand context: hero_backdrop/signature_props/mood_override/human_allowed were researched and "
+               "stored per brand but never reached the analysis prompt - now wired in; TROIKA's identity corrected "
+               "against troika.de directly - keyring added to signature_props, website fixed to the consumer site)")
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

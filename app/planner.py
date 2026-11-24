@@ -232,8 +232,14 @@ def _brand(s: Session, lp: LibProduct) -> tuple[str, dict]:
     key = brand_key_for(lp, rows)
     d = (rows[key].data or {}) if key in rows else {}
     lines = [f"Brand: {d.get('brand_name') or lp.brand or 'unbranded'}"]
-    for k, lbl in (("positioning", "Positioning"), ("palette_hex", "Brand colours"), ("brand_dos", "Do"),
-                   ("brand_donts", "Don't"), ("golden_style", "Look of our approved shots")):
+    # positioning/palette/dos/donts/golden_style were already read; hero_backdrop, signature_props, mood_override
+    # and human_allowed were sitting in every brand's own row unused - researched and stored, never reaching the
+    # analysis step or the prompt. Wiring them in is the direct fix for prompts defaulting to generic studio
+    # choices instead of this brand's own researched identity.
+    for k, lbl in (("positioning", "Positioning"), ("palette_hex", "Brand colours"), ("mood_override", "Mood"),
+                   ("hero_backdrop", "Preferred backdrop"), ("signature_props", "Signature props to draw from"),
+                   ("human_allowed", "Hands/people in frame"), ("brand_dos", "Do"), ("brand_donts", "Don't"),
+                   ("golden_style", "Look of our approved shots")):
         if d.get(k) not in (None, "", "-"):
             lines.append(f"{lbl}: {d[k]}")
     for kind, card in ((d.get("shots") or {}).items()):

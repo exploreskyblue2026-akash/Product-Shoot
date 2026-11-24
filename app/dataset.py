@@ -167,6 +167,21 @@ def seed(s: Session, owner_email: str, owner_hash: str):
         if (get_setting(s, "model_planner", "") or "").startswith("openrouter:openai/gpt-5"):
             set_setting(s, "model_planner", "openrouter:anthropic/claude-sonnet-5.5")
         set_setting(s, "preset_fix_stale_gpt5_v1", True)
+    if not get_setting(s, "preset_brand_troika_v1", False) and os.environ.get("SKIP_PRESETS") != "1":
+        # seed() only ever adds brand-new fields to a row you already have (your edits in the tool always win),
+        # so re-researching an existing brand's CSV row doesn't reach the live database on its own - this is the
+        # same one-time-correction pattern as the gpt-5 fix above, applied to TROIKA's researched identity
+        # (confirmed against troika.de directly): their flagship "keyring" line was missing from signature_props,
+        # and the website pointed at the B2B portal instead of the consumer site.
+        row = s.scalars(select(LibraryRow).where(LibraryRow.table == "brands", LibraryRow.key == "troika")).first()
+        if row is not None:
+            d = dict(row.data or {})
+            if "keyring" not in str(d.get("signature_props", "")):
+                d["signature_props"] = "keyring|notebook|desk accessories|travel items"
+            if d.get("website") == "https://business.troika.de/":
+                d["website"] = "https://troika.de/en"
+            row.data = d
+        set_setting(s, "preset_brand_troika_v1", True)
     if not get_setting(s, "purge_prices_v1", False):        # commercial data (cost / price / stock) is never kept
         from .db import LibProduct
         for lp in s.scalars(select(LibProduct)):
