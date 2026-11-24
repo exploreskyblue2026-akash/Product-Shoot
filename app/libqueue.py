@@ -246,7 +246,7 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
         items = cur
         if (new.get("prep") or {}).get("state") == "ready":
             done += 1
-            if auto_send:
+            if auto_send or new.get("send_when_ready"):
                 send(s, [new["key"]], items)
         set_setting(s, "shoot_list", items)
         s.commit()
@@ -334,7 +334,7 @@ def auto_tick(s: Session) -> None:
     for i, x in enumerate(cur):
         if x["code"] == new["code"]:
             cur[i] = {**x, **{k: new[k] for k in ("key", "match", "prep") if k in new}}
-    if (new.get("prep") or {}).get("state") == "ready" and get_setting(s, "auto_send_studio", False):
+    if (new.get("prep") or {}).get("state") == "ready" and (get_setting(s, "auto_send_studio", False) or new.get("send_when_ready")):
         send(s, [new["key"]], cur)
     set_setting(s, "shoot_list", cur)
     s.commit()

@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.6.0 (Library page reshuffled end to end: the always-expanded product-card grid - Product Kit "
+APP_VERSION = ("5.7.0 (Library page reshuffled end to end: the always-expanded product-card grid - Product Kit "
                "buttons, full analysis panels, approve/re-analyse/not-this-product on every card - is gone. In its "
                "place: one thin box to paste the codes you want researched, and one 'Main agent' queue table right "
                "below it that the worker now advances on its own, one code at a time, every few seconds - no timer, "
@@ -11,7 +11,12 @@ APP_VERSION = ("5.6.0 (Library page reshuffled end to end: the always-expanded p
                "flagged for review expands in place (Review button) with just Approve/Reject, instead of a whole "
                "card's worth of JSON. Rejecting a code now moves it to its own Rejected section rather than losing "
                "it, and a Restore button brings it back. Sources (Drive/sheet/upload) and the photo-clustering "
-               "stats are tucked into collapsed sections since they're set up once, not watched continuously.")
+               "stats are tucked into collapsed sections since they're set up once, not watched continuously. "
+               "Brand pages: 'Send this brand's queue to studio' used to push straight into the Studio queue, "
+               "sometimes before a product had ever been researched. It now sends the brand's queue into the "
+               "Library's main agent instead - same store-then-brand-website-then-raw-photos research every other "
+               "Library code gets - and the main agent carries it on to the Studio queue by itself once it's ready, "
+               "in the same brand-then-position order as before.")
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

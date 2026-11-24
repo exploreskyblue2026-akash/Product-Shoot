@@ -712,11 +712,15 @@ def test_brand_workspace_queue_and_order():
     assert ranks["apli"] == 1 and ranks["troika"] == 2 and ranks["milan"] is None
     c.post("/api/autopilot", json={"pipeline_mode": "v2"})
     r = c.post("/api/brands/troika/send").json()
-    assert r["total"] == 2
-    st = c.get("/api/state").json()["queue"]
-    mine = [x for x in st if x["code"] in ("PEN20/SI", "TRV20/GY")]
+    assert r["sent"] == 2
+    # 'send' now queues the brand's products in the Library's main agent, not straight into the Studio queue -
+    # they only reach the Studio once the agent has actually researched them (photos + an analysis)
+    lq = {x["code"]: x for x in c.get("/api/library").json()["lqueue"]}
+    assert {"PEN20/SI", "TRV20/GY"} <= set(lq)
+    mine = [lq["PEN20/SI"], lq["TRV20/GY"]]
     assert [x["code"] for x in sorted(mine, key=lambda x: x["priority"])] == ["PEN20/SI", "TRV20/GY"]
     assert all(2000 < x["priority"] < 3000 for x in mine)                         # brand #2 block
+    assert all(x.get("send_when_ready") for x in mine)        # will reach the Studio queue on its own once ready
     assert c.get("/brands/troika").status_code == 200
     from app.db import SessionLocal
     from app.library import focus_index

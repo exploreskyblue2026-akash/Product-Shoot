@@ -103,7 +103,7 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
       <div style="flex:1;min-width:220px"><h1 id="bname" style="margin:0;font-size:26px">—</h1><div class="hint" id="bmeta"></div></div>
       <div class="acts"><label class="btn sm">Upload logo<input type="file" accept="image/*" hidden id="logo-up"></label>
         <span class="field" style="min-width:140px"><select id="rank" aria-label="Position in the studio's brand order"></select></span>
-        <button class="btn sm primary" id="send" type="button">Send this brand's queue to studio</button></div></div>
+        <button class="btn sm primary" id="send" type="button" title="Queues every product below in the Library's main agent: photos from the SkyBlue store, then this brand's own website, then any raw photos - analysed and planned - then sent on to the Studio on its own">Send this brand's queue to the Library for research</button></div></div>
   </section>
 
   <div class="cols">
@@ -206,7 +206,7 @@ $("#rank").onchange=async()=>{const v=$("#rank").value;let order=ALL.filter(b=>b
 $("#web-index").onclick=async()=>{try{await api(`/api/brands/${encodeURIComponent(KEY)}/web-index`,{method:"POST"});toast("Reading the website in the background (can take 10-30 min). Reload this page to see progress.")}catch(x){toast(x.message)}};
 $("#reset").onclick=async()=>{const n=D.profile.brand_name||KEY;if(prompt(`This removes ALL photos, catalogue pictures, analyses and unfinished queue items of ${n}. Master-sheet rows stay. Type RESET to confirm.`)!=="RESET")return;
   try{const r=await api(`/api/brands/${encodeURIComponent(KEY)}/reset`,{method:"POST"});toast(`${n}: ${r.photos} photos and ${r.queue_items} queue items removed, ${r.products_kept} products kept`);await load()}catch(x){toast(x.message)}};
-$("#send").onclick=async()=>{try{const r=await api(`/api/brands/${encodeURIComponent(KEY)}/send`,{method:"POST"});toast(`${r.total} sent to the studio: ${r.total-r.waiting-r.missing} ready, ${r.waiting} waiting for photos`)}catch(x){toast(x.message)}};
+$("#send").onclick=async()=>{try{const r=await api(`/api/brands/${encodeURIComponent(KEY)}/send`,{method:"POST"});toast(r.sent?`${r.sent} product(s) sent to the Library's main agent for research (${r.new} new) - they'll reach the Studio queue on their own once ready. See the Product Library page to track them.`:"This brand's queue is empty")}catch(x){toast(x.message)}};
 let st=null;$("#search").addEventListener("input",()=>{clearTimeout(st);st=setTimeout(load,300)});
 load().catch(e=>toast(e.message));
 </script>

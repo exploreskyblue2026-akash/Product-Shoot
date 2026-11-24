@@ -933,7 +933,7 @@ def library_state(u=Depends(need("viewer"))):
         r["job"] = job
         r["drive_link"] = get_setting(s, "library_drive_link", "")
         r["cutouts_folder"] = bool(get_setting(s, "cutouts_drive_folder", ""))
-        r["lqueue"] = [{k: it.get(k) for k in ("code", "key", "match", "prep", "priority")}
+        r["lqueue"] = [{k: it.get(k) for k in ("code", "key", "match", "prep", "priority", "send_when_ready")}
                        for it in (get_setting(s, "shoot_list", []) or [])]
         r["auto_prepare"] = get_setting(s, "auto_prepare", True)
         r["auto_send_studio"] = get_setting(s, "auto_send_studio", False)
@@ -1603,9 +1603,11 @@ def brands_order(body: KeysIn, u=Depends(need("editor"))):
 
 @app.post("/api/brands/{key}/send")
 def brand_send(key: str, u=Depends(need("editor"))):
-    """Send this brand's queue to the studio (key = 'all' sends every ranked brand in brand order)."""
+    """Send this brand's queue to the Library's main agent for research (key = 'all' sends every ranked brand in
+    brand order). The main agent fetches each product's photos (SkyBlue store, the brand's own website, raw photos),
+    analyses it and plans the shots, then pushes it on to the Studio queue on its own once it's ready."""
     with SessionLocal() as s:
-        r = brandws.send_to_studio(s, None if key == "all" else [key])
+        r = brandws.send_to_library(s, None if key == "all" else [key])
         s.commit()
     pipeline.STOP.clear()
     return {"ok": True, **r}

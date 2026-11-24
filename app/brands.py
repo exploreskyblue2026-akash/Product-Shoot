@@ -9,7 +9,7 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .db import LibImage, LibProduct, LibraryRow, Product, log
+from .db import LibImage, LibProduct, LibraryRow, Product, get_setting, log, set_setting
 
 
 def _n(x: str) -> str:
@@ -163,20 +163,40 @@ def queued_keys(s: Session) -> set[str]:
     return out
 
 
-def send_to_studio(s: Session, keys: list[str] | None = None) -> dict:
-    """Load brand queues into the studio queue, in brand order then queue order. keys=None: every ranked brand."""
-    from .v2 import load_items
+def send_to_library(s: Session, keys: list[str] | None = None) -> dict:
+    """Push brand queues into the Library's main agent, in brand order then queue order, instead of straight into
+    the Studio queue. Each product then gets the same research every other Library code gets - its photos from the
+    SkyBlue store first, then the brand's own official website, plus any raw photos already filed under it - and an
+    analysis / shot plan, before the main agent sends it on to the Studio on its own. keys=None: every ranked brand."""
+    from . import libqueue
     rows = brand_rows(s)
     chosen = keys or [k for k, r in rows.items() if (r.data or {}).get("rank") is not None]
     chosen.sort(key=lambda k: ((rows[k].data or {}).get("rank") or 999))
-    items = []
+    lib = {p.key: p for p in s.scalars(select(LibProduct))}
+    codes, priority, touched_keys = [], {}, []
     for k in chosen:
         d = rows[k].data or {}
         rank = d.get("rank") or 999
         for pos, lib_key in enumerate(d.get("queue") or [], 1):
-            items.append({"key": lib_key, "code": lib_key, "priority": rank * 1000 + pos, "shots": [],
-                          "note": "", "brand_key": k})
-    r = load_items(s, items)
-    log(s, "brands", f"Sent {len(items)} products from {', '.join(chosen)} to the studio queue")
+            p = lib.get(lib_key)
+            code = (p.product_id or p.key) if p else lib_key
+            codes.append(code)
+            priority[code] = rank * 1000 + pos
+            if p:
+                touched_keys.append(p.key)
+    if not codes:
+        return {"added": 0, "total": 0}
+    r = libqueue.add_codes(s, "\n".join(codes))
+    items = list(get_setting(s, "shoot_list", []) or [])
+    for it in items:
+        if it["code"] in priority:
+            # this was triggered from the brand page to get this product shot, not just reviewed - once the main
+            # agent has it ready, send it straight on to the Studio queue, whatever the general auto-send setting is
+            it["priority"] = priority[it["code"]]
+            it["send_when_ready"] = True
+    set_setting(s, "shoot_list", items)
     s.commit()
-    return r
+    libqueue.send(s, keys=touched_keys)     # anything already researched and ready goes straight on, right now
+    log(s, "brands", f"Sent {len(codes)} product(s) from {', '.join(chosen)} to the Library for research")
+    s.commit()
+    return {"sent": len(codes), "new": r.get("added", 0)}
