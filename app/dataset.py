@@ -182,6 +182,17 @@ def seed(s: Session, owner_email: str, owner_hash: str):
                 d["website"] = "https://troika.de/en"
             row.data = d
         set_setting(s, "preset_brand_troika_v1", True)
+    if not get_setting(s, "preset_escalate_default_v1", False) and os.environ.get("SKIP_PRESETS") != "1":
+        # escalate_model (Admin -> Autopilot rules -> "If QC fails, retry once with") is the only thing that
+        # stops a failed generation from hard-stopping the product - but it ships blank, and the gpt-5 fix above
+        # actually cleared it if it had been pointed at a retired model, so in practice it has been empty this
+        # whole time. Black Forest Labs' own content-moderation block (a 400 from their side, not ours) has been
+        # hitting several products a week with nothing to fall back to. Only set it if it's still blank - this
+        # never overwrites a model the person picked on purpose - and point it at Gemini's own image model, a
+        # different provider entirely, so a BFL-side block (or any OpenRouter-side failure) has somewhere to go.
+        if not (get_setting(s, "escalate_model", "") or "").strip():
+            set_setting(s, "escalate_model", "gemini-3-pro-image")
+        set_setting(s, "preset_escalate_default_v1", True)
     if not get_setting(s, "purge_prices_v1", False):        # commercial data (cost / price / stock) is never kept
         from .db import LibProduct
         for lp in s.scalars(select(LibProduct)):

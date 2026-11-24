@@ -2,17 +2,20 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.5.4 (Library page was overloaded: every poll rendered up to 300 full product cards at once, each "
+APP_VERSION = ("5.5.5 (Library page was overloaded: every poll rendered up to 300 full product cards at once, each "
                "one eagerly embedding its whole analysis JSON into a hidden edit textarea - now caps the first "
                "render at 60 cards with a Show more button, and the JSON textarea only fills in once you actually "
                "open that card's Edit plan section. Studio queue: 'Load shoot sheet into queue' used to dump every "
                "code ever added to the shoot sheet - including stale no-photo/error rows - into the queue every "
                "time; you can now type the exact codes you want queued (they jump to the top), and clear stuck "
-               "no-photo/error rows in one click without touching healthy queue items. Biggest change: a code "
-               "sitting ready in the Library used to need a manual 'Load shoot sheet' click (or a 30-min autoscan) "
-               "before it reached the Studio queue - now the worker pushes every newly-ready shoot-sheet code into "
-               "the queue on its own, every few seconds, the moment it has a usable photo, without ever touching a "
-               "product already in the queue (no reset of a manual pause, reorder, or priority))")
+               "no-photo/error rows in one click without touching healthy queue items. A code sitting ready in the "
+               "Library used to need a manual 'Load shoot sheet' click (or a 30-min autoscan) before it reached the "
+               "Studio queue - now the worker pushes every newly-ready shoot-sheet code into the queue on its own, "
+               "every few seconds, without ever touching a product already in the queue (no reset of a manual "
+               "pause, reorder, or priority). The escalate/retry model (the only thing that stops a failed "
+               "generation from hard-stopping a product) has been blank this whole time - Black Forest Labs' own "
+               "content-moderation blocks had nowhere to fall back to. It's now defaulted to Gemini's image model "
+               "if nothing was already set, never overwriting a model you picked yourself)")
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
