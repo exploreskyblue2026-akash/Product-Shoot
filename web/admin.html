@@ -183,6 +183,7 @@ pre.prompt{margin:0;font-family:var(--f-mono);font-size:12px;line-height:1.55;wh
           <div class="field"><label for="s-budget_month">Monthly budget (USD)</label><input id="s-budget_month" data-setting="budget_month" data-type="float" inputmode="decimal"></div>
           <div class="field"><label for="s-budget_action">At 100% of budget</label><select id="s-budget_action" data-setting="budget_action"><option value="pause">Pause autopilot</option><option value="alert">Keep going</option></select></div>
           <div class="field"><label for="s-file_naming">File naming</label><input id="s-file_naming" class="mono" data-setting="file_naming"></div>
+          <div class="field"><label for="s-v2_autoqueue">Shoot-sheet mode: push newly-ready codes into the Studio queue</label><select id="s-v2_autoqueue" data-setting="v2_autoqueue" data-type="bool"><option value="true">Automatically, as soon as they have a photo (recommended)</option><option value="false">Only when I press "Load shoot sheet into queue"</option></select></div>
         </div>
         <div class="toolbar" style="margin-top:12px"><button class="btn primary" type="button" data-save-settings>Save autopilot rules</button></div>
       </section>

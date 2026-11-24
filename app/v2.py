@@ -39,6 +39,40 @@ def brand_for(s: Session, text: str) -> str:
 
 
 # ------------------------------------------------------------------ queue from the shoot sheet
+def auto_sync_queue(s: Session) -> int:
+    """Runs on every worker tick (every few seconds, not on a timer of its own): the moment a shoot-sheet code
+    has a usable photo in the Library, it is pushed into the Studio queue automatically - no 'Load shoot sheet'
+    click needed. Unlike load_shoot_sheet()/load_items(), this NEVER touches a product already in the queue
+    (no priority reset, no clobbering a manual drag-reorder or pause) - it only ever adds brand-new rows for
+    codes that aren't in the Studio queue yet, and only once they're actually ready to shoot. A code with no
+    photo yet is simply skipped and picked up automatically on a later tick once a photo appears."""
+    if get_setting(s, "pipeline_mode", "v1") != "v2" or not get_setting(s, "v2_autoqueue", True):
+        return 0
+    items = get_setting(s, "shoot_list", []) or []
+    if not items:
+        return 0
+    known = {(p.data or {}).get("lib_key") for p in s.scalars(select(Product)) if (p.data or {}).get("v2")}
+    top = max([(p.data or {}).get("priority", 0) for p in s.scalars(select(Product)) if (p.data or {}).get("v2")], default=0)
+    added, n = 0, 0
+    for it in items:
+        key = it.get("key")
+        if not key or key in known:
+            continue
+        img = s.scalar(select(LibImage).where(LibImage.key == key, LibImage.primary == True))  # noqa: E712
+        q = (img.meta or {}) if img else {}
+        ready = bool(img and img.cut_status != "skip" and (not q.get("flags") or q.get("override")))
+        if not ready:
+            continue                                     # not yet - picked up automatically once it has a photo
+        n += 1
+        load_items(s, [{**it, "priority": top + n}])
+        known.add(key)
+        added += 1
+    if added:
+        log(s, "v2", f"Auto-queued {added} newly-ready code(s) from the shoot sheet")
+        s.commit()
+    return added
+
+
 def load_shoot_sheet(s: Session) -> dict:
     """Create studio queue items ONLY for the codes in the shoot sheet. Nothing else is queued."""
     items = get_setting(s, "shoot_list", []) or []

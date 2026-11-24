@@ -360,6 +360,53 @@ def test_v2_queue_codes_and_clear_stuck():
     assert "BCO64/GY" in after_codes                              # the healthy, ready row is left alone
 
 
+def test_v2_auto_queue_picks_up_newly_ready_codes_without_a_click():
+    """The Studio queue should fill itself in as codes become ready - no 'Load shoot sheet' click, no waiting on
+    any timer - and it must never touch a product that's already in the queue (so a manual pause/reorder sticks)."""
+    import io, openpyxl
+    from PIL import Image, ImageDraw
+    from app import v2
+    from app.db import SessionLocal
+    c = client()
+    LIB = Path(__file__).parent / "library"
+    def photo(color):
+        im = Image.new("RGB", (1000, 1000), (255, 255, 255))
+        ImageDraw.Draw(im).rectangle([250, 300, 750, 700], fill=color)
+        b = io.BytesIO(); im.save(b, "PNG"); return b.getvalue()
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["SHOOT", "SHOTS", "PRIORITY", "NOTE"])
+    ws.append(["CBO30/DG", "", 1, ""]); ws.append(["CBO60/BR", "", 2, ""])
+    b = io.BytesIO(); wb.save(b)
+    # neither code has a photo yet - nothing should be auto-queued
+    c.post("/api/library/upload", files=[("files", ("master.xlsx", (LIB / "master.xlsx").read_bytes(), "x/y")),
+                                         ("files", ("autoq.xlsx", b.getvalue(), "x/y"))])
+    wait_job(c)
+    with SessionLocal() as s:
+        assert v2.auto_sync_queue(s) == 0
+    assert "CBO30/DG" not in {q["code"] for q in c.get("/api/state").json()["queue"]}
+    # drop a photo for just one of them - the next tick should queue only that one, automatically
+    c.post("/api/library/upload", files=[("files", ("CBO30-DG front.jpg", photo((40, 120, 40)), "image/jpeg"))])
+    wait_job(c)
+    with SessionLocal() as s:
+        assert v2.auto_sync_queue(s) == 1
+    st = c.get("/api/state").json()
+    q = {x["code"]: x for x in st["queue"]}
+    assert "CBO30/DG" in q and "CBO60/BR" not in q
+    # pause + bump priority by hand, then run auto-sync again - it must leave this row alone
+    pid = q["CBO30/DG"]["id"]
+    c.post(f"/api/products/{pid}/pause", json={"paused": True})
+    with SessionLocal() as s:
+        from app.db import Product
+        p = s.get(Product, pid)
+        p.data = {**(p.data or {}), "priority": 42}
+        s.commit()
+    with SessionLocal() as s:
+        assert v2.auto_sync_queue(s) == 0                  # already known -> never re-touched
+    st = c.get("/api/state").json()
+    row = next(x for x in st["queue"] if x["code"] == "CBO30/DG")
+    assert row["priority"] == 42 and row["paused"] is True
+
+
 def test_saved_hero_only_can_make_more():
     """A product auto-saved with only the hero can still get shots 2-5 from the approve button."""
     c = client()
