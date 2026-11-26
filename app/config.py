@@ -2,7 +2,19 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.8.2 (Library page layout: the Input queue and Researched table now sit side by side in two tall, "
+APP_VERSION = ("5.8.3 (Two real root causes fixed for codes getting stuck with 'Another library job is still "
+               "running' and the queue never visibly moving: (1) adding codes or pressing 'Run the agent' while "
+               "any Library job was active used to be flatly refused - including the completely ordinary case of "
+               "pasting one more code while a big batch was still being researched, which is exactly what the "
+               "screenshot showed: codes sitting in the paste box, Input queue at 0, nothing happening. Requests "
+               "are now queued instead of rejected - they run the moment the current job finishes, so nothing is "
+               "ever silently dropped or bounced. (2) a single hung website fetch or AI call inside the per-code "
+               "research step had no timeout at all, so it could block the entire queue - and the 'job running' "
+               "flag that gates new submissions - indefinitely; credits kept burning on a call that would never "
+               "come back. Each code's research now runs under a hard 2-4 minute watchdog: if it doesn't finish in "
+               "time it's marked as timed-out and the queue moves on to the next code immediately instead of "
+               "stalling for hours.\n"
+               "5.8.2 (Library page layout: the Input queue and Researched table now sit side by side in two tall, "
                "independently-scrolling columns instead of being stacked full-width one under the other - so a "
                "batch of several dozen pasted codes is a scrollable list you can skim at a glance on the left, with "
                "the research results building up on the right as they come in, instead of a few rows showing before "

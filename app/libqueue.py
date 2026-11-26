@@ -11,12 +11,19 @@ Each step's result is stored on the item so the Library shows exactly where ever
 """
 import re
 import time
+import concurrent.futures as _cf
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .db import LibImage, LibProduct, get_setting, log, set_setting
+
+# A watchdog for _prep_one: a hung website or a slow AI call used to have nothing stopping it, so one bad code could
+# block the whole queue indefinitely - which is exactly what "stuck at the same count for hours, still burning
+# credits" turned out to be. max_workers is kept well above 1 so a handful of abandoned, still-hanging attempts from
+# earlier timeouts can never block a fresh one from getting its own slot.
+_watchdog_pool = _cf.ThreadPoolExecutor(max_workers=8, thread_name_prefix="libqueue-watchdog")
 
 
 def _say(msg: str):
@@ -206,6 +213,29 @@ def _prep_one(s: Session, it: dict, n_it: int, total: int, deadline: float, use_
     return it
 
 
+def _prep_one_guarded(it: dict, n_it: int, total: int, deadline: float, use_web: bool, seconds: int = 240) -> dict:
+    """Same as _prep_one, but with a hard wall-clock cap: a website or the AI provider that just hangs instead of
+    failing used to be able to block the entire queue forever, since nothing inside _prep_one itself enforces the
+    deadline it's handed. Runs on its own fresh session (a session isn't safe to share across threads), so the
+    caller's session is never touched by this. If it doesn't finish in time the code is marked as errored - "timed
+    out, will retry" - so the item after it still gets its turn; if the abandoned attempt eventually finishes anyway,
+    it quietly commits its real result afterwards, which simply overwrites the timeout note."""
+    from .db import SessionLocal
+
+    def work():
+        with SessionLocal() as s2:
+            r = _prep_one(s2, it, n_it, total, deadline, use_web)
+            s2.commit()
+            return r
+    fut = _watchdog_pool.submit(work)
+    try:
+        return fut.result(timeout=max(1, seconds))
+    except _cf.TimeoutError:
+        return {**it, "prep": {**(it.get("prep") or {}), "state": "error",
+                                "why": f"Timed out after {seconds}s (a website or the AI provider took too long) - will retry",
+                                "at": _now()}}
+
+
 def prepare(s: Session, minutes: int = 25, stop=None) -> str:
     """Run every waiting code through identify -> photos (store first) -> analysis -> ready (-> studio), one code at
     a time, start to finish, before moving to the next - the same single-file discipline the Studio generation
@@ -226,7 +256,7 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
         if time.time() > deadline or (stop and stop()):
             break
         try:
-            new = _prep_one(s, it, n, total, deadline, use_web)
+            new = _prep_one_guarded(it, n, total, deadline, use_web)
         except Exception as e:
             s.rollback()
             new = {**it, "prep": {**(it.get("prep") or {}), "state": "error", "why": str(e)[:160], "at": _now()}}
@@ -318,7 +348,11 @@ def auto_tick(s: Session) -> None:
     if day_spend(s) >= float(get_setting(s, "daily_budget", 3.0)):
         return
     use_web = get_setting(s, "use_websites", True)
-    new = _prep_one(s, todo[0], 1, len(todo), time.time() + 120, use_web)
+    it = todo[0]
+    try:
+        new = _prep_one_guarded(it, 1, len(todo), time.time() + 120, use_web, seconds=120)
+    except Exception as e:
+        new = {**it, "prep": {**(it.get("prep") or {}), "state": "error", "why": str(e)[:160], "at": _now()}}
     cur = list(get_setting(s, "shoot_list", []) or [])          # re-read: codes may have been added meanwhile
     for i, x in enumerate(cur):
         if x["code"] == new["code"]:

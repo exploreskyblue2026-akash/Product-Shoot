@@ -786,10 +786,20 @@ def library_page(u=Depends(need("editor"))):
     return FileResponse(config.WEB_DIR / "library.html")
 
 
+_lib_queue: list[tuple[str, object]] = []    # (name, fn) jobs waiting their turn behind the one currently running
+
+
 def _bg(name: str, fn):
-    """Long jobs (Drive scans, big catalogues) run in the background so the page never times out."""
+    """Long jobs (Drive scans, big catalogues, researching the queue) run in the background so the page never times
+    out. Only one runs at a time, but asking for a second one while the first is still going no longer refuses it
+    outright - that used to mean pasting one more code, or a routine Drive re-scan, while a big batch was still
+    being researched got flatly rejected with "Another library job is still running", including the ordinary case
+    of just adding codes. It's queued instead and starts the moment the current job finishes, so every request
+    that comes in eventually runs - nothing is ever silently dropped or bounced."""
     if _lib_job["running"]:
-        raise HTTPException(409, "Another library job is still running. Wait for it to finish.")
+        if not any(n == name for n, _ in _lib_queue):   # don't pile up repeats of the same job (e.g. double-clicks)
+            _lib_queue.append((name, fn))
+        return
     _lib_job.update(running=True, msg=name + "…", error="")
 
     def run():
@@ -801,6 +811,9 @@ def _bg(name: str, fn):
             _lib_job["error"] = f"{name} failed: {str(e)[:300]}"
         finally:
             _lib_job["running"] = False
+            if _lib_queue:
+                nxt_name, nxt_fn = _lib_queue.pop(0)
+                _bg(nxt_name, nxt_fn)
     threading.Thread(target=run, daemon=True).start()
 
 
@@ -844,14 +857,17 @@ class CodesIn(BaseModel):
 
 @app.post("/api/library/codes")
 def library_codes(body: CodesIn, u=Depends(need("editor"))):
-    """Paste product codes (any brand, one per line): they join the Library queue and are prepared automatically."""
+    """Paste product codes (any brand, one per line): they join the Library queue and are prepared automatically.
+    Added codes show up in the Input queue right away (add_codes runs first, synchronously); if research is already
+    under way for an earlier batch this one simply queues up behind it rather than being refused."""
     from . import libqueue
+    with SessionLocal() as s:
+        r = libqueue.add_codes(s, body.text, body.replace)
 
     def run(s):
-        r = libqueue.add_codes(s, body.text, body.replace)
         return _auto_prepare(s, f"{r['added']} code(s) added")
     _bg("Adding codes", run)
-    return {"ok": True}
+    return {"ok": True, **r}
 
 
 @app.post("/api/library/prepare")
