@@ -2,7 +2,13 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.8.1 (Found and fixed the real reason the Library queue looked stuck at the same count for hours "
+APP_VERSION = ("5.8.2 (Library page layout: the Input queue and Researched table now sit side by side in two tall, "
+               "independently-scrolling columns instead of being stacked full-width one under the other - so a "
+               "batch of several dozen pasted codes is a scrollable list you can skim at a glance on the left, with "
+               "the research results building up on the right as they come in, instead of a few rows showing before "
+               "you have to scroll the whole page. 'Run the agent' now sits above both columns since it drives "
+               "both.\n"
+               "5.8.1: Found and fixed the real reason the Library queue looked stuck at the same count for hours "
                "while still burning credits: the continuous background worker was calling its own single-code-at-a-"
                "time step every few seconds REGARDLESS of whether 'Run the agent' already had a research job running "
                "in the background - so two independent processes were researching the first code in the queue at "

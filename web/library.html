@@ -15,6 +15,12 @@ body{background:var(--bg);color:var(--ink);font-family:var(--f-body,system-ui,sa
 .nav{display:flex;gap:8px;flex-wrap:wrap}
 main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px}
 .row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.lib-agent-grid{display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start}
+.lib-col-in,.lib-col-out{min-width:0}
+.lib-list-scroll{max-height:560px;overflow-y:auto;border:1px solid var(--line);border-radius:10px}
+.lib-list-scroll table{width:100%}
+.lib-list-scroll thead th{position:sticky;top:0;background:var(--surface);z-index:1}
+@media (max-width:860px){.lib-agent-grid{grid-template-columns:1fr}.lib-list-scroll{max-height:320px}}
 .row .field{flex:1 1 260px}
 .hint{color:var(--muted);font-size:13px}
 .drop{border:2px dashed var(--line);border-radius:10px;padding:18px;text-align:center;cursor:pointer;color:var(--muted);font-size:14px}
@@ -92,23 +98,23 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
   <section class="panel" aria-labelledby="h-agent">
     <div class="panel-h"><h2 id="h-agent">Main agent · one button, one code at a time</h2><div class="acts"><a class="btn sm" href="/api/library/report.csv" download>Download report (CSV)</a><button class="btn sm danger" id="lq-wipe" type="button" title="Empty this whole queue and start again">Clear the whole queue</button></div></div>
     <p class="hint" style="margin-top:0">Paste the codes you need shot - any brand, none needed. Press "Run the agent": it works through the Input queue below, one code at a time from start to finish - finds it (your master sheet, or the brand's own site), pulls its photos (raw input first; if that's not enough, your SkyBlue store, then the brand's official website), analyses every photo, and writes the shot plan for the hero/lifestyle/use-case/detail shots, including telling each one directly when an input photo can be used as-is or with a small edit instead of a fresh generation. Researched codes land in the table below; press "Push ready codes to Studio" whenever you want to send everything that's ready, or turn on the automatic option to have it sent the moment it's ready. Nothing is ever dropped silently - a code that can't be found, has no photo, or needs your OK stays in the table with the reason, and the agent keeps coming back to it on its own.</p>
-    <div class="row" style="align-items:flex-start;gap:12px">
-      <label class="field" style="flex:1 1 320px">Codes to research (one per line)<textarea id="codes" rows="4" placeholder="081264FRS&#10;BBG64/GY&#10;8411574089070"></textarea></label>
-      <div style="display:flex;flex-direction:column;gap:8px;flex:0 1 300px;justify-content:flex-start">
-        <button class="btn primary" id="codes-run" type="button" style="font-size:15px;padding:12px">▶ Run the agent</button>
+    <button class="btn primary" id="codes-run" type="button" style="font-size:15px;padding:12px;width:100%;margin-bottom:10px">▶ Run the agent</button>
+    <div class="lib-agent-grid">
+      <div class="lib-col-in">
+        <label class="field">Paste codes to add (one per line)<textarea id="codes" rows="3" placeholder="081264FRS&#10;BBG64/GY&#10;8411574089070"></textarea></label>
         <label class="hint"><input type="checkbox" id="lq-auto"> Research automatically, the moment a code or photo arrives</label>
         <label class="hint"><input type="checkbox" id="lq-send"> Push researched codes to the Studio automatically</label>
         <label class="hint"><input type="checkbox" id="lq-store"> Check our own SkyBlue store for photos first</label>
         <label class="hint"><input type="checkbox" id="lq-web"> Use brand websites for research and photos</label>
+        <h3 style="margin:14px 0 4px;font-size:14px">Input queue - waiting to be picked up <span class="chip mute" id="in-n">0</span></h3>
+        <p class="hint" style="margin-top:0">Exactly as you pasted them. The moment the agent starts on a code it disappears from here and shows up on the right with what it found.</p>
+        <div class="lib-list-scroll"><table class="lq"><thead><tr><th>Code</th><th></th></tr></thead><tbody id="in"></tbody></table></div>
+      </div>
+      <div class="lib-col-out">
+        <h3 style="margin:0 0 4px;font-size:14px;display:flex;align-items:center;gap:10px">Researched <span class="chip mute" id="lq-n">0</span><button class="btn sm primary" id="lq-sendnow" type="button" style="margin-left:auto">Push ready codes to Studio →</button></h3>
+        <div class="lib-list-scroll" style="overflow-x:auto"><table class="lq"><thead><tr><th>Code</th><th>Brand</th><th>Found by</th><th>Photos</th><th>Status</th><th></th></tr></thead><tbody id="lq"></tbody></table></div>
       </div>
     </div>
-
-    <h3 style="margin:16px 0 4px;font-size:14px">Input queue - waiting to be picked up <span class="chip mute" id="in-n">0</span></h3>
-    <p class="hint" style="margin-top:0">Exactly as you pasted them. The moment the agent starts on a code it disappears from here and shows up below with what it found.</p>
-    <div class="tw" style="overflow-x:auto"><table class="lq"><thead><tr><th>Code</th><th></th></tr></thead><tbody id="in"></tbody></table></div>
-
-    <h3 style="margin:16px 0 4px;font-size:14px;display:flex;align-items:center;gap:10px">Researched <span class="chip mute" id="lq-n">0</span><button class="btn sm primary" id="lq-sendnow" type="button" style="margin-left:auto">Push ready codes to Studio →</button></h3>
-    <div class="tw" style="overflow-x:auto"><table class="lq"><thead><tr><th>Code</th><th>Brand</th><th>Found by</th><th>Photos</th><th>Status</th><th></th></tr></thead><tbody id="lq"></tbody></table></div>
   </section>
 
   <section class="panel" aria-labelledby="h-rej" id="rej-panel" hidden>
