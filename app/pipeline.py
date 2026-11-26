@@ -462,7 +462,19 @@ def tick() -> bool:
             rescan_watched(s)
             from . import v2, libqueue
             v2.auto_sync_queue(s)
-            libqueue.auto_tick(s)
+            # The Library's "Run the agent" button runs libqueue.prepare() in its own background thread (so the
+            # page doesn't hang waiting for it), completely separate from this worker tick. Without this guard,
+            # auto_tick() fired here every few seconds the whole time that background job was running - so the
+            # SAME first code in the queue was being picked up and researched a second time, concurrently, by two
+            # independent code paths that didn't know about each other. That is exactly the "several products
+            # researched at once" problem that was supposedly already fixed, just reintroduced through a second
+            # door: it burned real API cost on the same code over and over, and because each one wrote back a
+            # racing, half-finished copy of the queue, the visible count never moved - "stuck at 1/43 for hours"
+            # with the credits still ticking up. Skip the automatic single-step tick entirely while a Library job
+            # (prepare, a Drive scan, a sync) already owns the queue.
+            from .main import _lib_job
+            if not _lib_job["running"]:
+                libqueue.auto_tick(s)
             pid = next_job(s)
             only = None
             if pid:
