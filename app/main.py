@@ -625,7 +625,7 @@ SETTING_KEYS = ["library_autoscan", "library_focus", "library_drive_copy", "auto
                 "model_other", "file_naming", "min_raw_px", "output_drive_folder", "cost_mode", "default_shots",
                 "max_cost_product", "daily_budget", "hero_gate", "qc_mode", "usd_inr",
                 "model_hero", "model_detail", "model_use_case", "model_lifestyle", "escalate_model",
-                "plan_review", "model_planner", "hero_real_pixels", "reuse_inputs", "max_attempts_shot", "prep_workers", "reuse_min_px", "model_edit", "static_rules", "house_look", "hero_review",
+                "plan_review", "model_planner", "hero_real_pixels", "reuse_inputs", "max_attempts_shot", "reuse_min_px", "model_edit", "static_rules", "house_look", "hero_review",
                 "use_openrouter", "use_shopify", "use_drive", "use_websites", "auto_prepare", "auto_send_studio", "store_first"]
 
 

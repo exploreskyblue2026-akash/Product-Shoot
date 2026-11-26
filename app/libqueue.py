@@ -207,38 +207,29 @@ def _prep_one(s: Session, it: dict, n_it: int, total: int, deadline: float, use_
 
 
 def prepare(s: Session, minutes: int = 25, stop=None) -> str:
-    """Run every waiting code through identify -> photos (store first) -> analysis -> ready (-> studio).
-    Several codes are prepared at the same time (setting prep_workers, default 3); each worker has its own database
-    session, and only this function writes the queue, so nothing is lost."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from .db import SessionLocal
+    """Run every waiting code through identify -> photos (store first) -> analysis -> ready (-> studio), one code at
+    a time, start to finish, before moving to the next - the same single-file discipline the Studio generation
+    pipeline already uses for images. Researching several products at once used to be the default here (up to 3
+    worker threads): it multiplied the AI calls in flight, made it easy to blow past the daily budget without
+    noticing, and - the bigger problem - split the model's attention across several products' photos at the same
+    time instead of giving each one its full attention. So: one product gets identified, photographed and analysed
+    completely, then the next starts. This is the same function auto_tick() uses for a single step each worker
+    tick; this one just keeps going, back to back, over the whole queue."""
     deadline = time.time() + minutes * 60
     items = list(get_setting(s, "shoot_list", []) or [])
     use_web = get_setting(s, "use_websites", True)
     auto_send = get_setting(s, "auto_send_studio", False)
-    workers = max(1, min(6, int(get_setting(s, "prep_workers", 3) or 3)))
     todo = [(n, it) for n, it in enumerate(items, 1)
             if (it.get("prep") or {}).get("state") not in ("ready", "sent", "not_found", "rejected")]
     total, done = len(items), 0
-
-    def run(n, it):
+    for n, it in todo:
         if time.time() > deadline or (stop and stop()):
-            return n, None
-        with SessionLocal() as ws:
-            try:
-                return n, _prep_one(ws, it, n, total, deadline, use_web)
-            except Exception as e:
-                ws.rollback()
-                return n, {**it, "prep": {**(it.get("prep") or {}), "state": "error", "why": str(e)[:160], "at": _now()}}
-
-    if workers == 1 or len(todo) <= 1:
-        results = (run(n, it) for n, it in todo)
-    else:
-        pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="prep")
-        results = (f.result() for f in as_completed([pool.submit(run, n, it) for n, it in todo]))
-    for n, new in results:
-        if new is None:
-            continue
+            break
+        try:
+            new = _prep_one(s, it, n, total, deadline, use_web)
+        except Exception as e:
+            s.rollback()
+            new = {**it, "prep": {**(it.get("prep") or {}), "state": "error", "why": str(e)[:160], "at": _now()}}
         cur = list(get_setting(s, "shoot_list", []) or [])          # re-read: codes may have been added meanwhile
         for i, x in enumerate(cur):
             if x["code"] == new["code"]:
@@ -250,8 +241,6 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
                 send(s, [new["key"]], items)
         set_setting(s, "shoot_list", items)
         s.commit()
-    if workers > 1 and len(todo) > 1:
-        pool.shutdown(wait=False)
     items = list(get_setting(s, "shoot_list", []) or [])
     log(s, "library", f"Library queue prepared: {done} ready")
     s.commit()

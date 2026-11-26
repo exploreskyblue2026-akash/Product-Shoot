@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.7.0 (Library page reshuffled end to end: the always-expanded product-card grid - Product Kit "
+APP_VERSION = ("5.7.1 (Library page reshuffled end to end: the always-expanded product-card grid - Product Kit "
                "buttons, full analysis panels, approve/re-analyse/not-this-product on every card - is gone. In its "
                "place: one thin box to paste the codes you want researched, and one 'Main agent' queue table right "
                "below it that the worker now advances on its own, one code at a time, every few seconds - no timer, "
@@ -16,7 +16,11 @@ APP_VERSION = ("5.7.0 (Library page reshuffled end to end: the always-expanded p
                "sometimes before a product had ever been researched. It now sends the brand's queue into the "
                "Library's main agent instead - same store-then-brand-website-then-raw-photos research every other "
                "Library code gets - and the main agent carries it on to the Studio queue by itself once it's ready, "
-               "in the same brand-then-position order as before.")
+               "in the same brand-then-position order as before. The main agent itself used to research up to 3 "
+               "products at the same time (so a big batch - connecting a master sheet, sending a whole brand - hit "
+               "the AI and websites with several calls at once, and the model's attention was split across more "
+               "than one product's photos). It now does exactly one product at a time, start to finish, the same "
+               "single-file discipline the Studio generation queue already uses for images.")
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI
