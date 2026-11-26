@@ -58,6 +58,22 @@ def _model_for(s: Session, kind: str) -> tuple[str, str]:
     return config.model_name(chosen.strip() or config.mode_model(pick)), size
 
 
+def _effective_cap(s: Session, p: Product) -> float:
+    """The $ ceiling for one product's shots this run. "Max $ per product" in Admin is a hard safety limit, but its
+    0.30 default was set with the cheap "economy" models in mind. Raise cost_mode to premium/max (Pro images at 2K)
+    and the hero alone can already cost close to that - so the hero and one more shot would generate, the cap would
+    be hit, and shots 3-4 would just silently never happen with no obvious reason why ("only hero and lifestyle are
+    being generated"). The cap itself is still respected (never raised above what a person explicitly set it to if
+    that's already enough) - this only raises the floor so the configured cost_mode can actually finish the shots
+    it's supposed to make, instead of a stale default quietly cutting the run short."""
+    configured = float(get_setting(s, "max_cost_product", 0.30))
+    hero_m, other_m, size = config.COST_MODES.get(get_setting(s, "cost_mode", "economy"), config.COST_MODES["economy"])
+    per = {"hero": config.image_cost(config.mode_model(hero_m), size), "other": config.image_cost(config.mode_model(other_m), size)}
+    n = len(requested_shots(s, p)) or 1
+    floor = (per["hero"] + per["other"] * max(0, n - 1) + config.COST_VISION * n) * 1.25
+    return max(configured, round(floor, 3))
+
+
 def _sheet(images: list) -> bytes:
     """Reference photos side by side in one image, so QC compares against every view at once."""
     import io as _io
@@ -140,7 +156,7 @@ def process(pid: int, only: list[int] | None = None):
         s.commit()
         retries = int(get_setting(s, "retries", 0))
         qc_mode = get_setting(s, "qc_mode", "light")
-        cap = float(get_setting(s, "max_cost_product", 0.30))
+        cap = _effective_cap(s, p)
         hero_gate = bool(get_setting(s, "hero_gate", True))
         # only verified (not discarded) photos of this exact code: our store first, then the brand site, then the rest
         rank = {"front": 0, "unknown": 1, "": 1, "angle": 2, "side": 3}     # whole-product views first

@@ -2,25 +2,25 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.7.1 (Library page reshuffled end to end: the always-expanded product-card grid - Product Kit "
-               "buttons, full analysis panels, approve/re-analyse/not-this-product on every card - is gone. In its "
-               "place: one thin box to paste the codes you want researched, and one 'Main agent' queue table right "
-               "below it that the worker now advances on its own, one code at a time, every few seconds - no timer, "
-               "no manual click. A code that can't be found, has no photo, or needs a human OK is never dropped: it "
-               "stays in that same table with the reason, and the agent keeps retrying it on its own. A plan "
-               "flagged for review expands in place (Review button) with just Approve/Reject, instead of a whole "
-               "card's worth of JSON. Rejecting a code now moves it to its own Rejected section rather than losing "
-               "it, and a Restore button brings it back. Sources (Drive/sheet/upload) and the photo-clustering "
-               "stats are tucked into collapsed sections since they're set up once, not watched continuously. "
-               "Brand pages: 'Send this brand's queue to studio' used to push straight into the Studio queue, "
-               "sometimes before a product had ever been researched. It now sends the brand's queue into the "
-               "Library's main agent instead - same store-then-brand-website-then-raw-photos research every other "
-               "Library code gets - and the main agent carries it on to the Studio queue by itself once it's ready, "
-               "in the same brand-then-position order as before. The main agent itself used to research up to 3 "
-               "products at the same time (so a big batch - connecting a master sheet, sending a whole brand - hit "
-               "the AI and websites with several calls at once, and the model's attention was split across more "
-               "than one product's photos). It now does exactly one product at a time, start to finish, the same "
-               "single-file discipline the Studio generation queue already uses for images.")
+APP_VERSION = ("5.8.0 (Library page rebuilt again, around one button: paste codes and press 'Run the agent' - it adds "
+               "them, researches every one start to finish (find it, pull its photos, analyse it, write the shot "
+               "plan, including telling each shot directly when an input photo can be used as-is or with a small "
+               "edit instead of a fresh generation), and sends everything that comes out ready straight to the "
+               "Studio queue, in one click. The three separate buttons this used to take are gone. Codes you paste "
+               "now show up at once in their own 'Input queue' list and disappear from it one by one, live, the "
+               "moment the agent starts on each one - so a batch of 20 visibly counts down instead of just sitting "
+               "there until the whole thing is done. Sources, presets (research/send automatically, check the "
+               "store first, use brand websites) and the photo-filing stats are no longer tucked into collapsed "
+               "sections - everything is visible on the page at once. A 'Clear the whole queue' button empties the "
+               "list completely so it can be restarted from nothing, without touching the photos and research "
+               "already filed in the Library. Generation: 'Max cost per product' is now a floor, not just a "
+               "ceiling - it used to default to $0.30 regardless of Cost mode, so Premium/Max (Pro images at 2K) "
+               "could hit that cap after the hero and one more shot and silently never make the rest; the agent "
+               "now always raises its own working cap enough to finish the shots the Cost mode and shot count you "
+               "picked actually call for, and the Admin field only matters if you want a lower cap than that. Also "
+               "fixed: the 'Shots generated automatically' dropdown in Admin had its shot names wrong (labelled "
+               "lifestyle as 'detail' and vice versa), and 'Hero waits for approval' - which decides whether shots "
+               "2-4 start before a person approves the hero - had no setting in Admin to see or change at all.")
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"          # dataset shipped in the repo
 WEB_DIR = BASE_DIR / "web"            # approved UI

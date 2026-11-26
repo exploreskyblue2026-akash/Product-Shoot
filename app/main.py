@@ -864,17 +864,34 @@ def library_prepare(u=Depends(need("editor"))):
 class QueueSetIn(BaseModel):
     auto_prepare: bool | None = None
     auto_send_studio: bool | None = None
+    store_first: bool | None = None
+    use_websites: bool | None = None
 
 
 @app.put("/api/library/queue-settings")
 def library_queue_settings(body: QueueSetIn, u=Depends(need("editor"))):
     with SessionLocal() as s:
-        for k in ("auto_prepare", "auto_send_studio"):
+        for k in ("auto_prepare", "auto_send_studio", "store_first", "use_websites"):
             v = getattr(body, k)
             if v is not None:
                 set_setting(s, k, v)
         s.commit()
     return {"ok": True}
+
+
+@app.post("/api/library/queue/wipe")
+def library_wipe(u=Depends(need("owner"))):
+    """Empties the Library's main-agent queue completely - every waiting, researched, ready, sent and rejected code
+    is dropped from the queue list. This does not touch the photos or product records already filed in the Library
+    (those took real research/API calls to build and are reused, not redone); it only clears the queue screen so you
+    can restart it from a blank slate."""
+    from . import libqueue
+    with SessionLocal() as s:
+        n = len(get_setting(s, "shoot_list", []) or [])
+        set_setting(s, "shoot_list", [])
+        log(s, u.email, f"Library queue wiped: {n} code(s) removed")
+        s.commit()
+    return {"ok": True, "removed": n}
 
 
 class SendIn(BaseModel):
@@ -940,6 +957,7 @@ def library_state(u=Depends(need("viewer"))):
         r["master_link"] = get_setting(s, "master_sheet_link", "")
         r["master_synced"] = get_setting(s, "master_sheet_synced", "")
         r["store_first"] = get_setting(s, "store_first", True)
+        r["use_websites"] = get_setting(s, "use_websites", True)
         return r
 
 

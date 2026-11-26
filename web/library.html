@@ -75,35 +75,40 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
 </header>
 <main>
   <section class="panel" aria-labelledby="h-add">
-    <details id="src-details">
-      <summary style="cursor:pointer"><h2 id="h-add" style="display:inline;margin:0">Sources</h2> <span class="chip mute" id="job">Idle</span></summary>
-      <p class="hint" style="margin-top:10px">Drop anything: master sheet, shoot sheet, photos, ZIPs, catalogue PDFs, or scan Drive. Official product photos can also be fetched from each brand's website (set it up on the brand's page).</p>
-      <div class="row">
-        <label class="field">Google Drive folder or Shared drive link<input id="drive" placeholder="https://drive.google.com/drive/folders/…"></label>
-        <button class="btn primary" id="scan" type="button">Scan Drive</button>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <label class="field">Company master sheet (Google Sheets link · re-read automatically when it changes)<input id="mlink" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
-        <button class="btn" id="msync" type="button">Connect &amp; sync</button>
-      </div>
-      <p class="hint" id="mstat" style="margin:4px 0 0"></p>
-      <div class="drop" id="drop" tabindex="0" role="button" style="margin-top:12px">Drop files here or click to choose<input type="file" id="files" multiple hidden accept=".csv,.jpg,.jpeg,.png,.webp,.zip,.pdf,.xlsx,.xlsm"></div>
-    </details>
+    <div class="panel-h"><h2 id="h-add">Sources</h2> <span class="chip mute" id="job">Idle</span></div>
+    <p class="hint" style="margin-top:0">Drop anything: master sheet, shoot sheet, photos, ZIPs, catalogue PDFs, or scan Drive. Official product photos can also be fetched from each brand's website (set it up on the brand's page).</p>
+    <div class="row">
+      <label class="field">Google Drive folder or Shared drive link<input id="drive" placeholder="https://drive.google.com/drive/folders/…"></label>
+      <button class="btn primary" id="scan" type="button">Scan Drive</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="field">Company master sheet (Google Sheets link · re-read automatically when it changes)<input id="mlink" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
+      <button class="btn" id="msync" type="button">Connect &amp; sync</button>
+    </div>
+    <p class="hint" id="mstat" style="margin:4px 0 0"></p>
+    <div class="drop" id="drop" tabindex="0" role="button" style="margin-top:12px">Drop files here or click to choose<input type="file" id="files" multiple hidden accept=".csv,.jpg,.jpeg,.png,.webp,.zip,.pdf,.xlsx,.xlsm"></div>
   </section>
 
   <section class="panel" aria-labelledby="h-agent">
-    <div class="panel-h"><h2 id="h-agent">Main agent · researches the queue one by one</h2><div class="acts"><span class="hint" id="lq-n"></span><a class="btn sm" href="/api/library/report.csv" download>Download report (CSV)</a></div></div>
-    <p class="hint" style="margin-top:0">Paste the codes you need shot - any brand, none needed. The agent works through them on its own, one by one, with no timer: finds each in the master sheet (or on the brand's site), pulls its photos (your SkyBlue store first, then the brand's official website), analyses it and plans the shots, then pushes it straight into the Studio queue. Nothing is ever dropped silently - a code that can't be found, has no photo, or needs your OK stays below with the reason, and the agent keeps coming back to it on its own.</p>
+    <div class="panel-h"><h2 id="h-agent">Main agent · one button, one code at a time</h2><div class="acts"><a class="btn sm" href="/api/library/report.csv" download>Download report (CSV)</a><button class="btn sm danger" id="lq-wipe" type="button" title="Empty this whole queue and start again">Clear the whole queue</button></div></div>
+    <p class="hint" style="margin-top:0">Paste the codes you need shot - any brand, none needed. One button does everything, end to end, one code at a time: finds it (your master sheet, or the brand's own site), pulls its photos (raw input first; if that's not enough, your SkyBlue store, then the brand's official website), analyses every photo, and writes the shot plan for the hero/lifestyle/use-case/detail shots - including telling each one directly when an input photo can be used as-is or with a small edit instead of a fresh generation. A ready product is pushed straight into the Studio queue on its own. Nothing is ever dropped silently - a code that can't be found, has no photo, or needs your OK stays in the list below with the reason, and the agent keeps coming back to it on its own.</p>
     <div class="row" style="align-items:flex-start;gap:12px">
-      <label class="field" style="flex:1 1 320px">Codes to research (one per line)<textarea id="codes" rows="3" placeholder="081264FRS&#10;BBG64/GY&#10;8411574089070"></textarea></label>
-      <div style="display:flex;flex-direction:column;gap:8px;flex:0 1 300px">
-        <button class="btn primary" id="codes-add" type="button">Add to the queue</button>
+      <label class="field" style="flex:1 1 320px">Codes to research (one per line)<textarea id="codes" rows="4" placeholder="081264FRS&#10;BBG64/GY&#10;8411574089070"></textarea></label>
+      <div style="display:flex;flex-direction:column;gap:8px;flex:0 1 300px;justify-content:flex-start">
+        <button class="btn primary" id="codes-run" type="button" style="font-size:15px;padding:12px">▶ Run the agent</button>
         <label class="hint"><input type="checkbox" id="lq-auto"> Research automatically, the moment a code or photo arrives</label>
         <label class="hint"><input type="checkbox" id="lq-send"> Push researched codes to the Studio automatically</label>
-        <div class="acts"><button class="btn sm" id="lq-prep" type="button">Research now</button><button class="btn sm" id="lq-sendnow" type="button">Send ready to Studio</button><button class="btn sm" id="web-all" type="button" title="For every queued code: find its page on the brand's official site by EAN or reference, verify it, add its photos">Fetch official photos for queued codes</button></div>
+        <label class="hint"><input type="checkbox" id="lq-store"> Check our own SkyBlue store for photos first</label>
+        <label class="hint"><input type="checkbox" id="lq-web"> Use brand websites for research and photos</label>
       </div>
     </div>
-    <div class="tw" style="overflow-x:auto;margin-top:10px"><table class="lq"><thead><tr><th>Code</th><th>Brand</th><th>Found by</th><th>Photos</th><th>Status</th><th></th></tr></thead><tbody id="lq"></tbody></table></div>
+
+    <h3 style="margin:16px 0 4px;font-size:14px">Input queue - waiting to be picked up <span class="chip mute" id="in-n">0</span></h3>
+    <p class="hint" style="margin-top:0">Exactly as you pasted them. The moment the agent starts on a code it disappears from here and shows up below with what it found.</p>
+    <div class="tw" style="overflow-x:auto"><table class="lq"><thead><tr><th>Code</th><th></th></tr></thead><tbody id="in"></tbody></table></div>
+
+    <h3 style="margin:16px 0 4px;font-size:14px">Researched <span class="chip mute" id="lq-n">0</span></h3>
+    <div class="tw" style="overflow-x:auto"><table class="lq"><thead><tr><th>Code</th><th>Brand</th><th>Found by</th><th>Photos</th><th>Status</th><th></th></tr></thead><tbody id="lq"></tbody></table></div>
   </section>
 
   <section class="panel" aria-labelledby="h-rej" id="rej-panel" hidden>
@@ -113,12 +118,10 @@ main{max-width:1280px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px
   </section>
 
   <section class="panel" aria-labelledby="h-clu">
-    <details>
-      <summary style="cursor:pointer"><h2 id="h-clu" style="display:inline;margin:0">How photos were filed</h2></summary>
-      <p class="hint" style="margin:10px 0 0">A photo is filed under a product only when its code is certain: <b>1</b> the exact code or EAN as a whole word in the file / folder name, <b>2</b> a brand article number whose colour suffix fits exactly one product, <b>3</b> the brand's official product page (EAN or reference verified on the page), <b>4</b> you. Everything else waits in Unmatched with suggestions; nothing is guessed.</p>
-      <div class="acts" style="margin-top:8px"><button class="btn sm" id="rematch" type="button" title="Run the matching ladder again over all unmatched photos">Re-match unmatched photos</button></div>
-      <div class="stats" id="clu" style="margin-top:10px"></div>
-    </details>
+    <div class="panel-h"><h2 id="h-clu">How photos were filed</h2></div>
+    <p class="hint" style="margin-top:0">A photo is filed under a product only when its code is certain: <b>1</b> the exact code or EAN as a whole word in the file / folder name, <b>2</b> a brand article number whose colour suffix fits exactly one product, <b>3</b> the brand's official product page (EAN or reference verified on the page), <b>4</b> you. Everything else waits in Unmatched with suggestions; nothing is guessed.</p>
+    <div class="acts" style="margin-top:8px"><button class="btn sm" id="rematch" type="button" title="Run the matching ladder again over all unmatched photos">Re-match unmatched photos</button></div>
+    <div class="stats" id="clu" style="margin-top:10px"></div>
   </section>
 
   <section class="panel" aria-labelledby="h-cut" id="cut-panel">
@@ -161,12 +164,17 @@ function render(){
   $("#cut-panel").hidden=!D.cutouts;
   const rows=D.rows;
   {const q=D.lqueue||[];
-   const active=q.filter(x=>(x.prep||{}).state!=="rejected"), rejected=q.filter(x=>(x.prep||{}).state=="rejected");
-   $("#lq-n").textContent=active.length?`${active.length} codes · ${active.filter(x=>(x.prep||{}).state=="ready").length} ready · ${active.filter(x=>(x.prep||{}).state=="sent").length} in Studio`:"";
+   const waiting=q.filter(x=>(x.prep||{}).state==="waiting"||!x.prep);
+   const active=q.filter(x=>(x.prep||{}).state!=="rejected"&&(x.prep||{}).state!=="waiting"&&x.prep);
+   const rejected=q.filter(x=>(x.prep||{}).state=="rejected");
+   $("#in-n").textContent=waiting.length;
+   $("#in").innerHTML=waiting.map(x=>`<tr><td class="mono">${esc(x.code)}</td><td class="hint">waiting its turn…</td></tr>`).join("")||'<tr><td colspan="2" class="hint">Nothing waiting - paste codes above and press Run the agent.</td></tr>';
+   $("#lq-n").textContent=active.length?`${active.length} · ${active.filter(x=>(x.prep||{}).state=="ready").length} ready · ${active.filter(x=>(x.prep||{}).state=="sent").length} in Studio`:"0";
    if(document.activeElement!==$("#mlink"))$("#mlink").value=D.master_link||"";
    $("#mstat").textContent=D.master_link?`Connected${D.master_synced?" · last read "+D.master_synced.replace("T"," "):""} · only codes, EAN, names, short name and HSN are stored; costs, prices and stock are never kept.`:"Not connected: you can also drop the .xlsx above.";
    $("#lq-auto").checked=!!D.auto_prepare;$("#lq-send").checked=!!D.auto_send_studio;
-   $("#lq").innerHTML=active.map(lqRow).join("")||'<tr><td colspan="6" class="hint">No codes yet - paste some above.</td></tr>';
+   $("#lq-store").checked=!!D.store_first;$("#lq-web").checked=!!D.use_websites;
+   $("#lq").innerHTML=active.map(lqRow).join("")||'<tr><td colspan="6" class="hint">Nothing researched yet.</td></tr>';
    $("#rej-panel").hidden=!rejected.length;
    $("#rej-n").textContent=rejected.length?rejected.length+" code(s)":"";
    $("#rej").innerHTML=rejected.map(x=>{const p=x.prep||{};return `<tr><td class="mono">${esc(x.code)}</td><td>${esc(p.brand||"")}</td><td class="hint">${esc(p.rejected_reason||p.why||"")}</td><td><button class="btn sm" data-restore="${esc(x.code)}" type="button">Restore</button></td></tr>`}).join("")}
@@ -191,12 +199,29 @@ document.addEventListener("click",async e=>{
     try{await api(`/api/library/images/${g.dataset.assign}`,{method:"POST",body:{action:"assign",code}});toast("Assigned to "+code);await load();kick()}catch(x){toast(x.message)}}
 });
 $("#msync").onclick=async()=>{const v=$("#mlink").value.trim();if(!v)return toast("Paste the Google Sheets link");try{await api("/api/library/master-link",{method:"POST",body:{link:v}});toast("Reading the master sheet…");poll()}catch(x){toast(x.message)}};
-$("#codes-add").onclick=async()=>{const v=$("#codes").value.trim();if(!v)return toast("Paste at least one code");try{await api("/api/library/codes",{method:"POST",body:{text:v}});$("#codes").value="";toast("Codes added, the main agent is on it…");poll()}catch(x){toast(x.message)}};
-$("#lq-prep").onclick=async()=>{try{await api("/api/library/prepare",{method:"POST"});toast("Researching the queue…");poll()}catch(x){toast(x.message)}};
-$("#lq-sendnow").onclick=async()=>{try{const r=await api("/api/library/send",{method:"POST",body:{}});toast(`${r.sent} product(s) sent to the Studio queue`);await load()}catch(x){toast(x.message)}};
+$("#codes-run").onclick=async()=>{
+  const v=$("#codes").value.trim();
+  try{
+    if(v){await api("/api/library/codes",{method:"POST",body:{text:v}});$("#codes").value=""}
+    await api("/api/library/prepare",{method:"POST"});
+    toast(v?"Codes added - the agent is researching them one by one…":"The agent is researching the queue, one by one…");
+    await poll();
+    // the button is the one place that must always finish the job end to end, whatever the two automatic
+    // checkboxes are set to - so once research is done, anything that came out "ready" is sent to the Studio
+    // queue right here, not left sitting in the list waiting for a separate click.
+    const r=await api("/api/library/send",{method:"POST",body:{}});
+    if(r.sent)toast(`${r.sent} product(s) researched and sent to the Studio queue`);
+    await load();
+  }catch(x){toast(x.message)}
+};
+$("#lq-wipe").onclick=async()=>{
+  if(!confirm("Clear the whole Library queue? Every waiting, researched, ready and rejected code in this list will be removed. The photos and research already filed under each code stay in the Library and are not deleted."))return;
+  try{const r=await api("/api/library/queue/wipe",{method:"POST"});toast(`Queue cleared (${r.removed} code(s) removed)`);await load()}catch(x){toast(x.message)}
+};
 $("#lq-auto").onchange=e=>api("/api/library/queue-settings",{method:"PUT",body:{auto_prepare:e.target.checked}}).then(()=>toast("Saved"));
 $("#lq-send").onchange=e=>api("/api/library/queue-settings",{method:"PUT",body:{auto_send_studio:e.target.checked}}).then(()=>toast("Saved"));
-$("#web-all").onclick=async()=>{try{await api("/api/library/web-queue",{method:"POST"});toast("Fetching official photos for queued codes…");poll()}catch(x){toast(x.message)}};
+$("#lq-store").onchange=e=>api("/api/library/queue-settings",{method:"PUT",body:{store_first:e.target.checked}}).then(()=>toast("Saved"));
+$("#lq-web").onchange=e=>api("/api/library/queue-settings",{method:"PUT",body:{use_websites:e.target.checked}}).then(()=>toast("Saved"));
 $("#rematch").onclick=async()=>{try{await api("/api/library/rematch",{method:"POST"});toast("Re-matching unmatched photos…");poll()}catch(x){toast(x.message)}};
 $("#scan").onclick=async()=>{const link=$("#drive").value.trim(); if(!link)return toast("Paste a Drive folder link");try{await api("/api/library/scan",{method:"POST",body:{link}});toast("Scanning Drive…");poll()}catch(x){toast(x.message)}};
 const drop=$("#drop"), inp=$("#files");
