@@ -2,7 +2,15 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.8.4 (Fixed research/analysis failing with OpenRouter 402 'This request requires more credits, or "
+APP_VERSION = ("5.8.5 (New Cost mode: 'GPT · Image 2.6 Sunburst/Flare, xhigh' - uses OpenAI's GPT Image 2.6 via "
+               "OpenRouter instead of Gemini. As of the Artificial Analysis text-to-image arena (Nov 2026), GPT "
+               "Image 2.6 Sunburst is the #1 ranked image model overall, well above our Gemini Pro tier - and at "
+               "the 'xhigh' quality tier it costs about $0.094/image, noticeably LESS than Gemini Pro's "
+               "~$0.134-0.20/image. Sunburst (tuned for prompt adherence/edit consistency) handles hero + detail; "
+               "Flare (same price, faster/lower-latency) handles lifestyle + use-case. Needs the OpenRouter switch "
+               "on in Admin - picking this Cost mode without it now falls back to Gemini Pro automatically instead "
+               "of failing with a missing-key error partway through a run.\n"
+               "5.8.4 (Fixed research/analysis failing with OpenRouter 402 'This request requires more credits, or "
                "fewer max_tokens' for Claude models even with a healthy balance: the request never set max_tokens "
                "at all, so OpenRouter pre-checked the balance against the model's entire max output window "
                "(65,536 tokens for Claude Sonnet 5.5) rather than what an analysis actually needs - a few hundred "
@@ -96,6 +104,12 @@ COST_VISION = float(env("COST_VISION", "0.002"))
 COST_PLANNER = float(env("COST_PLANNER", "0.03"))      # analysis + 4 shot plans, best Pro model, once per product
 MODEL_IMAGE_LITE = env("MODEL_IMAGE_LITE", "gemini-3.1-flash-lite-image")
 COST_IMAGE_LITE = float(env("COST_IMAGE_LITE", "0.02"))
+# GPT Image 2.6 (via OpenRouter): ranked the #1 text-to-image model on the Artificial Analysis arena as of Nov 2026,
+# and at "high"/"xhigh" quality it costs LESS per image than our own Gemini Pro tier above - Sunburst is the variant
+# tuned for prompt adherence/edit consistency (used for hero+detail, where matching the real product matters most),
+# Flare is the faster/cheaper-latency sibling at the SAME per-image price (used for the two context shots).
+MODEL_IMAGE_GPT_SUNBURST = env("MODEL_IMAGE_GPT_SUNBURST", "openrouter:openai/gpt-image-2.6-sunburst")
+MODEL_IMAGE_GPT_FLARE = env("MODEL_IMAGE_GPT_FLARE", "openrouter:openai/gpt-image-2.6-flare")
 # Estimated USD per image by model + size. Check Google's pricing page and override with COST_* variables.
 SIZE_FACTOR = {"1K": 1.0, "2K": 1.5, "4K": 2.5}
 COST_MODES = {
@@ -104,11 +118,18 @@ COST_MODES = {
     "standard": ("fast", "fast", "1K"),
     "premium":  ("pro", "fast", "2K"),
     "max":      ("pro", "pro", "2K"),
+    # GPT Image 2.6 mode: "size" here drives the quality TIER sent to OpenRouter, not pixel resolution (OpenAI's
+    # Images API has no resolution knob, it uses quality tiers instead - see QUIRKS in providers/openrouter.py) -
+    # 1K->high ($0.053/image), 2K->xhigh ($0.094/image), 4K->max ($0.211/image). 2K/xhigh is the recommended
+    # default: noticeably more detail than "high" without jumping to Max's price, and still cheaper than our own
+    # Gemini Pro tier.
+    "gpt":      ("gpt_sunburst", "gpt_flare", "2K"),
 }
 
 
 def mode_model(kind: str) -> str:
-    return {"lite": MODEL_IMAGE_LITE, "fast": MODEL_IMAGE_FAST, "pro": MODEL_IMAGE_PRO}[kind]
+    return {"lite": MODEL_IMAGE_LITE, "fast": MODEL_IMAGE_FAST, "pro": MODEL_IMAGE_PRO,
+             "gpt_sunburst": MODEL_IMAGE_GPT_SUNBURST, "gpt_flare": MODEL_IMAGE_GPT_FLARE}[kind]
 
 
 def image_cost(model: str, size: str = "1K") -> float:
@@ -119,6 +140,10 @@ def image_cost(model: str, size: str = "1K") -> float:
         m = model.lower()
         if m.endswith(":free"):
             return 0.0
+        if "gpt-image-2.5" in m or "gpt-image-2.6" in m:
+            # Real per-image cost at 1024x1024 for Sunburst/Flare (both priced identically): size here is our own
+            # size->quality mapping (see COST_MODES["gpt"] and QUIRKS in providers/openrouter.py), not pixel size.
+            return {"1K": 0.053, "2K": 0.094, "4K": 0.211}.get(size, 0.053)
         if "gpt-image" in m:
             return {"1K": 0.04, "2K": 0.07, "4K": 0.17}.get(size, 0.04)
         return 0.075 if "max" in m else 0.02 if "klein" in m else 0.05

@@ -55,7 +55,14 @@ def _model_for(s: Session, kind: str) -> tuple[str, str]:
     pick = hero_m if kind in ("hero", "detail") else other_m
     # the model boxes in Admin -> API & models are what "pro" and "fast" mean (blank = built-in default)
     chosen = {"pro": get_setting(s, "model_hero_detail", ""), "fast": get_setting(s, "model_other", "")}.get(pick) or ""
-    return config.model_name(chosen.strip() or config.mode_model(pick)), size
+    default = config.mode_model(pick)
+    if default.startswith("openrouter:"):
+        # A Cost mode (e.g. "gpt") can itself point at an OpenRouter model by default - gate it the same way a
+        # per-shot override is gated above, so picking that Cost mode without also switching OpenRouter on falls
+        # back to Gemini instead of failing with a missing-key error the first time a shot actually runs.
+        from .dataset import or_gate
+        default = or_gate(s, default) or config.MODEL_IMAGE_PRO
+    return config.model_name(chosen.strip() or default), size
 
 
 def _effective_cap(s: Session, p: Product) -> float:

@@ -48,6 +48,12 @@ RESOLUTIONS = {"1K": "1K", "2K": "2K", "4K": "4K"}
 QUIRKS = {
     "openai/gpt-image-1": {"aspect_ratio": "2:3", "resolution": False, "quality": {"1K": "low", "2K": "medium", "4K": "high"}},
     "openai/gpt-image-1-mini": {"aspect_ratio": "2:3", "resolution": False, "quality": {"1K": "low", "2K": "medium", "4K": "high"}},
+    # GPT Image 2.6 (Sunburst/Flare): same shape as gpt-image-1 above (no resolution knob, quality tier instead),
+    # but the underlying OpenAI API accepts a much wider range of aspect ratios (down to 1:3) than gpt-image-1 did,
+    # so our real 4:5 product-shot ratio is used as-is instead of falling back to the nearest fixed ratio.
+    # size->quality here must match COST_MODES["gpt"] and config.image_cost()'s pricing table for the "gpt" mode.
+    "openai/gpt-image-2.6-sunburst": {"resolution": False, "quality": {"1K": "high", "2K": "xhigh", "4K": "max"}},
+    "openai/gpt-image-2.6-flare": {"resolution": False, "quality": {"1K": "high", "2K": "xhigh", "4K": "max"}},
 }
 
 
