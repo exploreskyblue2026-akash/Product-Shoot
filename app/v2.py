@@ -58,6 +58,11 @@ def auto_sync_queue(s: Session) -> int:
         key = it.get("key")
         if not key or key in known:
             continue
+        from .library import pick_primary
+        pick_primary(s, key)                             # re-derive the primary photo fresh: a product can genuinely
+        # have several usable photos in the Library with none of them currently flagged primary (the flag can lag
+        # behind research that just finished), and this was the exact cause of "has photos in the Library, shows no
+        # photo in Studio" - trusting a possibly-stale flag here instead of recomputing it.
         img = s.scalar(select(LibImage).where(LibImage.key == key, LibImage.primary == True))  # noqa: E712
         q = (img.meta or {}) if img else {}
         ready = bool(img and img.cut_status != "skip" and (not q.get("flags") or q.get("override")))
@@ -93,8 +98,12 @@ def load_items(s: Session, items: list[dict]) -> dict:
     for n, it in enumerate(items):
         key = it.get("key")
         lp = s.scalar(select(LibProduct).where(LibProduct.key == key)) if key else None
+        from .library import refs_for, pick_primary
+        if key:
+            pick_primary(s, key)                          # re-derive fresh, same reasoning as auto_sync_queue() above:
+            # a product can have usable photos in the Library with none currently flagged primary, which otherwise
+            # pushes it to Studio as "no photo" even though the Library clearly shows photos for it.
         img = s.scalar(select(LibImage).where(LibImage.key == key, LibImage.primary == True)) if key else None  # noqa: E712
-        from .library import refs_for
         q = (img.meta or {}) if img else {}
         ready = bool(img and img.cut_status != "skip" and (not q.get("flags") or q.get("override")))
         p = existing.get(key) if key else None

@@ -2,7 +2,14 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.8.6 (Brand page -> Shot cards: the Angle dropdown had no real 'let the analysis decide' option - "
+APP_VERSION = ("5.8.7 (Fixed products reaching Studio marked 'no photo' despite the Library clearly showing photos "
+               "found for them: Studio decides whether a product is ready to shoot by looking for the one Library "
+               "photo flagged 'primary', but that flag can legitimately lag behind research that just finished - a "
+               "product can have several real, usable photos in the Library with none of them currently flagged "
+               "primary yet. v2.load_items() and auto_sync_queue() now re-derive the primary photo fresh right "
+               "before checking readiness, instead of trusting whatever the flag happened to say at that moment - "
+               "so a product with real photos in the Library is never pushed to Studio as photo-less again.\n"
+               "5.8.6 (Brand page -> Shot cards: the Angle dropdown had no real 'let the analysis decide' option - "
                "'Same angle as the main real photo' was the default, and filling in ANY other field on a shot card "
                "(scene, background, props, extra instructions) silently pulled that 'same angle' choice along with "
                "it as a forced instruction, even for a brand page nobody had touched the Angle dropdown on. That "
