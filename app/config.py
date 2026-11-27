@@ -2,7 +2,14 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.8.8 (Library queue: 'Retry' is now available on an already-sent ('In the Studio queue') code, not "
+APP_VERSION = ("5.8.9 (Fixed a product showing photos in the Studio Inspector yet staying stuck as 'No photo' in the "
+               "queue, with no way to fix it: every available photo for that code was below the minimum photo size "
+               "(Admin's 'need 1500px+' setting), and the system was blocking it as not-ready with an error message "
+               "that told you to 'press Use anyway' - but that button never existed anywhere in the app. Added it: "
+               "the Studio Inspector now shows a 'Use anyway' button next to any flagged photo, and pressing it both "
+               "marks that photo as approved despite the flag AND immediately re-syncs any Studio item that was "
+               "stuck waiting on it, so it moves itself out of 'No photo' without you having to re-add the code.\n"
+               "5.8.8 (Library queue: 'Retry' is now available on an already-sent ('In the Studio queue') code, not "
                "just on a failed one - an item queued before the previous 'no photo in Studio' fix shipped had no "
                "way to force a re-check, since every other row state had a Retry button except this one. Retrying a "
                "sent item is cheap: its photos and plan are already in hand, so it goes straight back to Studio with "

@@ -277,6 +277,7 @@ def _trace(s, p) -> dict:
     row = lambda i: {"id": i.id, "src": img_url(i.path), "name": i.src_name, "w": i.w, "h": i.h, "source": i.source,  # noqa: E731
                      "angle": (i.meta or {}).get("angle", ""), "sharpness": (i.meta or {}).get("sharpness"),
                      "flags": (i.meta or {}).get("flags", []), "primary": i.primary,
+                     "override": bool((i.meta or {}).get("override")),
                      "reason": ((i.meta or {}).get("discarded") or {}).get("reason", "")}
     rec = (lp.data or {}).get("plan") if lp else None
     plan = None
@@ -1051,6 +1052,15 @@ def library_image(iid: int, body: ImgAct, u=Depends(need("editor"))):
             log(s, u.email, f"Product Kit {img.key}: {(img.meta or {}).get('angle')} view {'approved' if body.action == 'kit_approve' else 'rejected'}")
         elif body.action == "use_anyway":
             img.meta = {**(img.meta or {}), "override": True}
+            s.flush()                                # so load_items()'s own query below sees the override
+            from . import v2
+            stuck = [p for p in s.scalars(select(Product))
+                     if (p.data or {}).get("v2") and (p.data or {}).get("lib_key") == img.key and p.stage == "needs_photo"]
+            for p in stuck:                          # re-run the exact same queueing logic that would normally
+                d = p.data or {}                      # pick this up, so a product stuck via the Studio's own
+                v2.load_items(s, [{"key": img.key, "code": p.code, "shots": d.get("shots", []),  # "queue just
+                                    "note": d.get("note", ""), "priority": d.get("priority", 0)}])  # these codes"
+            log(s, u.email, f"Library: photo {iid} marked 'use anyway' for {img.key}" + (f" ({len(stuck)} queued item(s) re-synced)" if stuck else ""))
         elif body.action == "restore":              # back from the Discarded section; the AI never discards it again
             m = {k: v for k, v in (img.meta or {}).items() if k != "discarded"}
             img.meta = {**m, "keep": True}
