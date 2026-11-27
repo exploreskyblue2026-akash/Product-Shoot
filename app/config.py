@@ -2,7 +2,14 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.9.0 (Fixed the Library silently lying about a push to Studio: pressing 'Push ready codes to Studio' "
+APP_VERSION = ("5.9.1 (Self-healing for the one case that's a pure trade-off, not a judgement call: a product whose "
+               "only photo(s) are below the minimum size. The Library now catches this itself, during research, "
+               "instead of only finding out after a failed push to Studio: it forces one fresh re-check of the "
+               "store and the brand website (in case a bigger version has since appeared), and if nothing bigger "
+               "turns up, uses the best one anyway and carries on - no 'Use anyway' click needed for this case any "
+               "more. A judgement-call flag (blurry, or anything the analysis itself raises) is deliberately left "
+               "alone: it still needs you, via 'Use anyway' in the Studio Inspector (5.8.9), same as before.\n"
+               "5.9.0 (Fixed the Library silently lying about a push to Studio: pressing 'Push ready codes to Studio' "
                "(or auto-send) always stamped a code 'In the Studio queue' the moment load_items() ran, even when "
                "Studio's own, stricter photo check immediately bounced that code back to 'needs_photo' or 'error' - "
                "so the Library showed a clean success badge for a code that was actually stuck, with nothing telling "

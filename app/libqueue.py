@@ -186,6 +186,45 @@ def _prep_one(s: Session, it: dict, n_it: int, total: int, deadline: float, use_
         prep.update(state="needs_photo", why="No photo on the website or in Raw input for this code")
         it["prep"] = prep
         return it
+    # 2b photo quality gate: a photo existing isn't enough - Studio's own readiness check also requires the chosen
+    # primary photo to clear the quality flags (minimum resolution, sharpness), and this step used to not check
+    # that at all, so a product with only too-small/blurry photos could sail through as "ready" here and only fail
+    # once pushed to Studio (silently, until the 5.9.0 fix made that failure visible). Catch it here instead, before
+    # spending an analysis call on a photo Studio won't accept. A pure "too small" flag gets one forced re-check of
+    # both sources (safe to repeat - add_image() dedupes by image hash) in case a bigger version has since appeared,
+    # then is used anyway if nothing bigger turns up: a soft size shortfall is a quality trade-off worth making
+    # rather than stalling the product, but a judgement-call flag (blurry, or anything the analysis itself raises)
+    # always still waits for you.
+    from .library import pick_primary
+    pick_primary(s, it["key"])
+    primary = s.scalar(select(LibImage).where(LibImage.key == it["key"], LibImage.primary == True))  # noqa: E712
+    flags = list((primary.meta or {}).get("flags") or []) if primary else []
+    if primary and flags and not (primary.meta or {}).get("override"):
+        size_only = all(f.startswith("too small") for f in flags)
+        if size_only and not prep.get("size_rechecked"):
+            from .library import store_fetch as _store_fetch
+            for fetch in (_store_fetch, web_fetch):
+                try:
+                    fetch(s, it["key"])
+                except Exception:
+                    pass
+            prep["size_rechecked"] = True
+            photos = list(s.scalars(select(LibImage).where(LibImage.key == it["key"], LibImage.dup_of.is_(None),
+                                                           LibImage.cut_status != "skip")))
+            photos = [i for i in photos if not (i.meta or {}).get("discarded")]
+            prep["photos"] = len(photos)
+            pick_primary(s, it["key"])
+            primary = s.scalar(select(LibImage).where(LibImage.key == it["key"], LibImage.primary == True))  # noqa: E712
+            flags = list((primary.meta or {}).get("flags") or []) if primary else []
+        if flags and all(f.startswith("too small") for f in flags):
+            primary.meta = {**(primary.meta or {}), "override": True}
+            prep["photo_note"] = f"Only {primary.w}×{primary.h} available even after re-checking the brand site/store - used anyway."
+            s.commit()
+        # A remaining judgement-call flag (blurry, or anything else) is deliberately NOT auto-resolved and NOT
+        # blocked here either: it proceeds to "ready"/"sent" as normal, and Studio's own readiness check (v2.py)
+        # still refuses it - the 5.9.0 fix then reports that honestly as "sent_flagged" with the Studio Inspector's
+        # "Use anyway" button (5.8.9) as the one lever that actually resolves it. Blocking it here instead would
+        # strand it in the Library with only a Retry button and no way to see or override the flagged photo.
     # 3 analysis (best model): always, it is what every prompt is written from
     rec = (lp.data or {}).get("plan")
     if not rec or rec.get("stale") or rec.get("status") != "ok":
