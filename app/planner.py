@@ -244,7 +244,12 @@ def _brand(s: Session, lp: LibProduct) -> tuple[str, dict]:
             lines.append(f"{lbl}: {d[k]}")
     for kind, card in ((d.get("shots") or {}).items()):
         if (card or {}).get("mode") == "custom":
-            bits = [f"{f}: {card[f]}" for f in ("angle", "scene", "background", "props", "pose", "extra") if card.get(f)]
+            # "angle: auto" (the default) means "let the per-product analysis decide from the product's own
+            # physical form" - it is deliberately never forwarded as an instruction, even when other fields on
+            # this card (scene/background/props/...) made the card "custom". Only an explicit override
+            # (same/flat/photo) is sent, and only then does it take precedence over the dynamic decision.
+            bits = [f"{f}: {card[f]}" for f in ("angle", "scene", "background", "props", "pose", "extra")
+                    if card.get(f) and not (f == "angle" and card[f] == "auto")]
             if bits:
                 lines.append(f"Brand rule for {kind}: " + "; ".join(bits))
     return "\n".join(lines), d

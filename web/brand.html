@@ -164,13 +164,22 @@ async function load(){D=await api(`/api/brands/${encodeURIComponent(KEY)}?q=${en
   renderShots();renderLists()}
 
 const SH=[["hero","1 · Hero"],["lifestyle","2 · Lifestyle"],["use_case","3 · Use case"],["detail","4 · Detail"]];
-const METHOD={hero:[["same","Same angle as the main real photo (recommended)"],["flat","Top-down flat lay"]],detail:[["same","Close-up from the hero angle (recommended)"],["flat","Top-down close-up"]],use_case:[["same","Same face and angle as the hero (recommended)"],["flat","Top-down flat lay"],["photo","From a real 45° / side photo (only if one exists)"]],lifestyle:[["same","Same face and angle as the hero (recommended)"],["flat","Top-down flat lay"],["photo","From a real 45° / side photo (only if one exists)"]]};
+// "auto" is the real default: the per-product analysis works out the camera angle itself from the product's own
+// physical form (how it naturally rests/stands/leans), never from whatever angle the reference photo happens to
+// be shot at. "same"/"flat"/"photo" are explicit overrides - pick one only to force every product of this brand
+// into that one angle regardless of its shape. Filling in Scene/Background/Props/etc. on a card used to silently
+// pull "same" along with it as a forced instruction even when nobody had touched the Angle dropdown; "auto" fixes
+// that by being the one value planner.py never forwards as an instruction (see _brand() in app/planner.py).
+const METHOD={hero:[["auto","Let the per-product analysis decide (recommended)"],["same","Same angle as the main real photo"],["flat","Top-down flat lay"]],
+  detail:[["auto","Let the per-product analysis decide (recommended)"],["same","Close-up from the hero angle"],["flat","Top-down close-up"]],
+  use_case:[["auto","Let the per-product analysis decide (recommended)"],["same","Same face and angle as the hero"],["flat","Top-down flat lay"],["photo","From a real 45° / side photo (only if one exists)"]],
+  lifestyle:[["auto","Let the per-product analysis decide (recommended)"],["same","Same face and angle as the hero"],["flat","Top-down flat lay"],["photo","From a real 45° / side photo (only if one exists)"]]};
 const SF=[["scene","Scene / setting","e.g. pastel desk with laptop and notebook"],["background","Background / surface","e.g. light grey seamless · solid orange paper"],["props","Props","plain, unbranded real objects only, e.g. blank notebook, plain pencils, small plant"],["pose","Hands / people / pose","e.g. a hand writing in a notebook (leave empty for none)"],["extra","Extra instructions","anything else for this shot"]];
 function renderShots(){const S=D.profile.shots||{};$("#shots").innerHTML=SH.map(([k,l])=>{const c=S[k]||{};return `<div class="card" data-shot="${k}"><h3>${l}</h3>
-  <label>Angle<select data-f="angle">${METHOD[k].map(([v,t])=>`<option value="${v}"${(c.angle||"same")==v?" selected":""}>${t}</option>`).join("")}</select></label>
+  <label>Angle<select data-f="angle">${METHOD[k].map(([v,t])=>`<option value="${v}"${(c.angle||"auto")==v?" selected":""}>${t}</option>`).join("")}</select></label>
   ${SF.filter(([f])=>!(k=="hero"&&f=="pose")).map(([f,t,ph])=>`<label>${t}<textarea rows="2" data-f="${f}" placeholder="${esc(ph)}">${esc(c[f]||"")}</textarea></label>`).join("")}</div>`}).join("")}
 $("#save-shots").onclick=async()=>{const shots={};document.querySelectorAll("#shots .card").forEach(cd=>{const c={};cd.querySelectorAll("[data-f]").forEach(i=>{if(i.value.trim())c[i.dataset.f]=i.value.trim()});
-  const filled=Object.keys(c).some(x=>x!="angle"&&x!="method"&&c[x])||(c.angle&&c.angle!="same");c.mode=filled?"custom":"default";shots[cd.dataset.shot]=c});
+  const filled=Object.keys(c).some(x=>x!="angle"&&x!="method"&&c[x])||(c.angle&&c.angle!="auto");c.mode=filled?"custom":"default";shots[cd.dataset.shot]=c});
   try{await api(`/api/admin/library/brands/${encodeURIComponent(KEY)}`,{method:"PUT",body:{shots}});toast("Shot cards saved, used from the next generation");await load()}catch(x){toast(x.message)}};
 function renderLists(){
   $("#qn").textContent=D.queue.length;

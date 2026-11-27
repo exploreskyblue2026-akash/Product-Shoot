@@ -2,7 +2,18 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.8.5 (New Cost mode: 'GPT · Image 2.6 Sunburst/Flare, xhigh' - uses OpenAI's GPT Image 2.6 via "
+APP_VERSION = ("5.8.6 (Brand page -> Shot cards: the Angle dropdown had no real 'let the analysis decide' option - "
+               "'Same angle as the main real photo' was the default, and filling in ANY other field on a shot card "
+               "(scene, background, props, extra instructions) silently pulled that 'same angle' choice along with "
+               "it as a forced instruction, even for a brand page nobody had touched the Angle dropdown on. That "
+               "overrode the per-product analysis's own camera-angle decision (worked out from the product's real "
+               "physical form - how it naturally rests, stands or leans) with whatever angle the reference photo "
+               "happened to be shot at. Added a real 'Let the per-product analysis decide (recommended)' option, "
+               "now the true default - 'Same angle', 'Top-down flat lay' etc. are explicit overrides you choose "
+               "only to force every product of that brand into one fixed angle regardless of shape. Existing brand "
+               "pages with other shot-card fields already filled in (e.g. MILAN) are still sending the old forced "
+               "'same angle' instruction until their Angle dropdown is switched to the new option and re-saved.\n"
+               "5.8.5 (New Cost mode: 'GPT · Image 2.6 Sunburst/Flare, xhigh' - uses OpenAI's GPT Image 2.6 via "
                "OpenRouter instead of Gemini. As of the Artificial Analysis text-to-image arena (Nov 2026), GPT "
                "Image 2.6 Sunburst is the #1 ranked image model overall, well above our Gemini Pro tier - and at "
                "the 'xhigh' quality tier it costs about $0.094/image, noticeably LESS than Gemini Pro's "
