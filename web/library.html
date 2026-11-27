@@ -153,7 +153,7 @@ let D=null, done=0, total=0, lib=null, running=false, pauseUntil=0;
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("on"),3500)}
 async function api(p,o={}){const r=await fetch(p,{credentials:"same-origin",...o,headers:o.body&&!(o.body instanceof FormData)?{"Content-Type":"application/json"}:{},body:o.body&&!(o.body instanceof FormData)?JSON.stringify(o.body):o.body});
   if(r.status==401){location.href="/login";throw new Error("Signed out")} const j=await r.json().catch(()=>({})); if(!r.ok)throw new Error(j.detail||r.statusText); return j}
-const LQ={waiting:["mute","Waiting"],ready:["ok","Researched · ready for Studio"],sent:["info","In the Studio queue"],needs_photo:["warn","Needs a photo"],review:["warn","Needs your approval"],not_found:["bad","Not found"],error:["bad","Error"],rejected:["bad","Rejected"]};
+const LQ={waiting:["mute","Waiting"],ready:["ok","Researched · ready for Studio"],sent:["info","In the Studio queue"],sent_flagged:["warn","In Studio - stuck, needs your approval"],needs_photo:["warn","Needs a photo"],review:["warn","Needs your approval"],not_found:["bad","Not found"],error:["bad","Error"],rejected:["bad","Rejected"]};
 async function load(){try{D=await api("/api/library");render()}catch(e){toast(e.message)}}
 function lqRow(x){
   const p=x.prep||{}, st=LQ[p.state||"waiting"]||["mute",p.state];
@@ -161,8 +161,8 @@ function lqRow(x){
   // photo - and that is exactly what is needed right after a fix like pick_primary() being re-derived at push time
   // (see v2.py), for an item that was queued before that fix shipped. Retrying a "sent" item is cheap: its photos
   // are already fetched and its plan is already "ok", so prepare() skips straight to re-sending it to Studio.
-  const canRetry=["needs_photo","not_found","error","sent"].includes(p.state);
-  const canReject=p.state!=="sent";
+  const canRetry=["needs_photo","not_found","error","sent","sent_flagged"].includes(p.state);
+  const canReject=p.state!=="sent"&&p.state!=="sent_flagged";
   const isReview=p.state==="review";
   const main=`<tr><td class="mono">${esc(x.code)}</td><td>${esc(p.brand||"")}</td><td>${esc(x.match=="exact"?"master sheet":(x.match||"").replace(/^close match/,"master sheet, close match"))}</td><td>${p.photos!=null?`${p.photos} (${p.store_photos||0} store · ${p.website_photos||0} brand site)`:""}</td><td><span class="chip ${st[0]}">${st[1]}</span>${p.why?`<div class="hint">${esc(p.why)}</div>`:""}</td><td>${isReview?`<button class="btn sm" data-review-toggle="${esc(x.code)}" type="button">Review</button>`:""}${canRetry?`<button class="btn sm" data-retry="${esc(x.code)}" type="button">Retry</button>`:""}${canReject?`<button class="btn sm danger" data-reject="${esc(x.code)}" type="button">Reject</button>`:""}</td></tr>`;
   const sub=isReview?`<tr class="revrow" data-reviewrow="${esc(x.code)}" hidden><td colspan="6"><div class="note">${esc(p.why||"Flagged by the analysis")}</div><div class="acts" style="margin-top:6px"><button class="btn sm primary" data-approve="${esc(x.key||"")}" data-code="${esc(x.code)}" type="button">✓ Approve plan</button><button class="btn sm danger" data-reject="${esc(x.code)}" type="button">✕ Reject</button></div></td></tr>`:"";

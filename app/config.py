@@ -2,7 +2,15 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.8.9 (Fixed a product showing photos in the Studio Inspector yet staying stuck as 'No photo' in the "
+APP_VERSION = ("5.9.0 (Fixed the Library silently lying about a push to Studio: pressing 'Push ready codes to Studio' "
+               "(or auto-send) always stamped a code 'In the Studio queue' the moment load_items() ran, even when "
+               "Studio's own, stricter photo check immediately bounced that code back to 'needs_photo' or 'error' - "
+               "so the Library showed a clean success badge for a code that was actually stuck, with nothing telling "
+               "you where to go fix it. libqueue.send() now checks what Studio actually did with each code: a code "
+               "that really made it through still shows 'In the Studio queue', but one that bounced now shows 'In "
+               "Studio - stuck, needs your approval' with the real reason, and points you at the 'Use anyway' button "
+               "in the Studio Inspector (5.8.9) instead of leaving you to guess.\n"
+               "5.8.9 (Fixed a product showing photos in the Studio Inspector yet staying stuck as 'No photo' in the "
                "queue, with no way to fix it: every available photo for that code was below the minimum photo size "
                "(Admin's 'need 1500px+' setting), and the system was blocking it as not-ready with an error message "
                "that told you to 'press Use anyway' - but that button never existed anywhere in the app. Added it: "

@@ -250,7 +250,7 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
     use_web = get_setting(s, "use_websites", True)
     auto_send = get_setting(s, "auto_send_studio", False)
     todo = [(n, it) for n, it in enumerate(items, 1)
-            if (it.get("prep") or {}).get("state") not in ("ready", "sent", "not_found", "rejected")]
+            if (it.get("prep") or {}).get("state") not in ("ready", "sent", "sent_flagged", "not_found", "rejected")]
     total, done = len(items), 0
     for n, it in todo:
         if time.time() > deadline or (stop and stop()):
@@ -282,8 +282,15 @@ def prepare(s: Session, minutes: int = 25, stop=None) -> str:
 
 
 def send(s: Session, keys: list[str] | None = None, items: list | None = None) -> dict:
-    """Ready codes -> Studio queue (in Library-queue order)."""
+    """Ready codes -> Studio queue (in Library-queue order). 'Ready' here only means the Library's own, looser
+    check (photos exist, analysis passed) - the Studio side (v2.load_items) applies a stricter one on top (the
+    primary photo must also clear the quality flags, e.g. minimum resolution). Those two checks used to disagree
+    silently: this function blindly stamped every pushed code 'sent' / 'In the Studio queue' even when Studio
+    bounced it straight back to 'needs_photo' - so the Library looked like a success while the Studio queue showed
+    a stuck, photo-less row with no visible link between the two. Now it actually looks at what Studio did with
+    each code before deciding which badge to show."""
     from .v2 import load_items
+    from .db import Product
     own = items is None
     items = items if items is not None else list(get_setting(s, "shoot_list", []) or [])
     pick = [it for it in items if it.get("key") and (it.get("prep") or {}).get("state") == "ready"
@@ -292,12 +299,22 @@ def send(s: Session, keys: list[str] | None = None, items: list | None = None) -
         return {"sent": 0}
     r = load_items(s, [{"key": it["key"], "code": it["code"], "shots": it.get("shots") or [], "note": it.get("note", ""),
                         "priority": it.get("priority", 0)} for it in pick])
+    by_key = {(p.data or {}).get("lib_key"): p for p in s.scalars(select(Product)) if (p.data or {}).get("v2")}
+    sent = stuck = 0
     for it in pick:
-        it["prep"] = {**(it.get("prep") or {}), "state": "sent", "sent_at": _now()}
+        p = by_key.get(it["key"])
+        if p is not None and p.stage in ("needs_photo", "error"):
+            it["prep"] = {**(it.get("prep") or {}), "state": "sent_flagged", "sent_at": _now(),
+                         "why": f"In the Studio queue, but stuck there: {p.error or 'not ready'}. Open it in Studio "
+                                 "and press 'Use anyway' on the flagged photo (or Retry, once there's a better one)."}
+            stuck += 1
+        else:
+            it["prep"] = {**(it.get("prep") or {}), "state": "sent", "sent_at": _now()}
+            sent += 1
     if own:
         set_setting(s, "shoot_list", items)
     s.commit()
-    return {"sent": len(pick), **({k: v for k, v in r.items() if isinstance(v, int)} if isinstance(r, dict) else {})}
+    return {"sent": sent, "stuck": stuck, **({k: v for k, v in r.items() if isinstance(v, int)} if isinstance(r, dict) else {})}
 
 
 def reset_item(s: Session, code: str):
