@@ -2,7 +2,12 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.8.7 (Fixed products reaching Studio marked 'no photo' despite the Library clearly showing photos "
+APP_VERSION = ("5.8.8 (Library queue: 'Retry' is now available on an already-sent ('In the Studio queue') code, not "
+               "just on a failed one - an item queued before the previous 'no photo in Studio' fix shipped had no "
+               "way to force a re-check, since every other row state had a Retry button except this one. Retrying a "
+               "sent item is cheap: its photos and plan are already in hand, so it goes straight back to Studio with "
+               "the now-corrected primary photo.\n"
+               "5.8.7 (Fixed products reaching Studio marked 'no photo' despite the Library clearly showing photos "
                "found for them: Studio decides whether a product is ready to shoot by looking for the one Library "
                "photo flagged 'primary', but that flag can legitimately lag behind research that just finished - a "
                "product can have several real, usable photos in the Library with none of them currently flagged "

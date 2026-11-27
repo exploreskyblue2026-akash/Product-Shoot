@@ -157,7 +157,11 @@ const LQ={waiting:["mute","Waiting"],ready:["ok","Researched · ready for Studio
 async function load(){try{D=await api("/api/library");render()}catch(e){toast(e.message)}}
 function lqRow(x){
   const p=x.prep||{}, st=LQ[p.state||"waiting"]||["mute",p.state];
-  const canRetry=["needs_photo","not_found","error"].includes(p.state);
+  // "sent" is retryable too: an item already in the Studio queue has no other lever to force a re-check of its
+  // photo - and that is exactly what is needed right after a fix like pick_primary() being re-derived at push time
+  // (see v2.py), for an item that was queued before that fix shipped. Retrying a "sent" item is cheap: its photos
+  // are already fetched and its plan is already "ok", so prepare() skips straight to re-sending it to Studio.
+  const canRetry=["needs_photo","not_found","error","sent"].includes(p.state);
   const canReject=p.state!=="sent";
   const isReview=p.state==="review";
   const main=`<tr><td class="mono">${esc(x.code)}</td><td>${esc(p.brand||"")}</td><td>${esc(x.match=="exact"?"master sheet":(x.match||"").replace(/^close match/,"master sheet, close match"))}</td><td>${p.photos!=null?`${p.photos} (${p.store_photos||0} store · ${p.website_photos||0} brand site)`:""}</td><td><span class="chip ${st[0]}">${st[1]}</span>${p.why?`<div class="hint">${esc(p.why)}</div>`:""}</td><td>${isReview?`<button class="btn sm" data-review-toggle="${esc(x.code)}" type="button">Review</button>`:""}${canRetry?`<button class="btn sm" data-retry="${esc(x.code)}" type="button">Retry</button>`:""}${canReject?`<button class="btn sm danger" data-reject="${esc(x.code)}" type="button">Reject</button>`:""}</td></tr>`;
