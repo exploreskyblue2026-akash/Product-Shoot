@@ -2,7 +2,17 @@
 import os
 from pathlib import Path
 
-APP_VERSION = ("5.8.3 (Two real root causes fixed for codes getting stuck with 'Another library job is still "
+APP_VERSION = ("5.8.4 (Fixed research/analysis failing with OpenRouter 402 'This request requires more credits, or "
+               "fewer max_tokens' for Claude models even with a healthy balance: the request never set max_tokens "
+               "at all, so OpenRouter pre-checked the balance against the model's entire max output window "
+               "(65,536 tokens for Claude Sonnet 5.5) rather than what an analysis actually needs - a few hundred "
+               "to a few thousand tokens. Rather than lowering the ceiling and risking a cut-off analysis, the "
+               "cap is now a generous 32,000 for analysis/shot-plan calls (JSON) and 4,000 for short text replies "
+               "(titles, descriptions) - both far above what a real response ever reaches, so nothing about the "
+               "analysis itself is shortened, only the worst case OpenRouter has to check your balance against. "
+               "If a response is ever genuinely cut off at that cap, it now fails loudly with a clear error "
+               "instead of silently handing back broken JSON.\n"
+               "5.8.3 (Two real root causes fixed for codes getting stuck with 'Another library job is still "
                "running' and the queue never visibly moving: (1) adding codes or pressing 'Run the agent' while "
                "any Library job was active used to be flatly refused - including the completely ordinary case of "
                "pasting one more code while a big batch was still being researched, which is exactly what the "

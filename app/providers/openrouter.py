@@ -111,11 +111,21 @@ def generate(model: str, prompt: str, images: list[bytes], size: str = "1K") -> 
 
 
 def complete(model: str, prompt: str, images: list[bytes] | None = None, json_mode: bool = False,
-             temperature: float = 0.2) -> str:
+             temperature: float = 0.2, max_tokens: int | None = None) -> str:
     """Text (optionally JSON) response from a text/vision model, with 0-N images as vision input. Used for
-    product analysis, shot-prompt drafting, SEO titles and descriptions when that box is set to 'openrouter:...'."""
+    product analysis, shot-prompt drafting, SEO titles and descriptions when that box is set to 'openrouter:...'.
+
+    max_tokens matters more than it looks: when it's left unset, OpenRouter assumes the worst case - the model's
+    entire max output window (e.g. 65536 tokens for Claude Sonnet 5.5) - and pre-checks whether the account's
+    balance could cover THAT, even though a real response is a few hundred to a few thousand tokens. On a modest
+    balance this fails upfront with 402 "This request requires more credits, or fewer max_tokens" before the
+    model does any work at all - the exact failure the Library's analysis step was hitting. The fix is not to
+    truncate the analysis (a lower cap could cut off a real answer); json_mode defaults to a generous 32000, which
+    is reserved for the credit pre-check but essentially never actually reached by the shot-plan JSON this calls
+    for, and plain text replies (titles, descriptions) default to a small 4000 since those are always short."""
     content = [{"type": "text", "text": prompt}] + [{"type": "image_url", "image_url": {"url": _url(b)}} for b in (images or [])]
-    body = {"model": model, "messages": [{"role": "user", "content": content}], "temperature": temperature}
+    body = {"model": model, "messages": [{"role": "user", "content": content}], "temperature": temperature,
+            "max_tokens": max_tokens if max_tokens is not None else (32000 if json_mode else 4000)}
     if json_mode:
         body["response_format"] = {"type": "json_object"}
     r = httpx.post(URL, json=body, timeout=300, headers={"Authorization": f"Bearer {_key()}",
@@ -133,6 +143,12 @@ def complete(model: str, prompt: str, images: list[bytes] | None = None, json_mo
         text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
     if not text:
         raise RuntimeError(f"OpenRouter {model} returned an empty response")
+    if choices[0].get("finish_reason") == "length":
+        # Cut off by the max_tokens cap rather than ending naturally - surface this loudly instead of handing back
+        # truncated JSON that would fail to parse (or parse into a silently incomplete plan). If this ever actually
+        # fires, the fix is to raise the cap further, not to let a half-finished analysis through.
+        raise RuntimeError(f"OpenRouter {model}: response was cut off at the {body['max_tokens']}-token cap before "
+                            f"finishing - raise max_tokens rather than accept a truncated analysis")
     return text
 
 
